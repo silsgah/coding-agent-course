@@ -1,8 +1,14 @@
 <div align="center">
 
+<img src="assets/logo.jpg" alt="EED Soft Consult" width="280"/>
+
+<br>
+
 # 🛠️ Building a Coding Agent From Scratch
 
 ### The harness — not the model — makes a coding agent good. Build one from scratch, week by week, and prove it.
+
+**A course by [EED Soft Consult](https://eedsoftconsult.com)**
 
 <br>
 
@@ -414,3 +420,15 @@ Found a bug and know the fix? Fork, fix, and open a pull request. Future readers
 ## License
 
 Released under [Apache-2.0](LICENSE) — clone, fork, and build on it.
+
+---
+
+<div align="center">
+
+<img src="assets/logo.jpg" alt="EED Soft Consult" width="180"/>
+
+**Built with ❤️ by [EED Soft Consult](https://eedsoftconsult.com)**
+
+*AI Training · Software Engineering · Consulting*
+
+</div>
