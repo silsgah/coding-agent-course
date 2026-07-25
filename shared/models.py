@@ -54,10 +54,9 @@ class ModelResponse:
 class GeminiProvider:
     """Google Gemini via the google-genai SDK."""
 
-    def __init__(self, model: str = "gemini-2.5-flash", api_key: str | None = None):
-        self.model = model
+    def __init__(self, model: str | None = None, api_key: str | None = None):
+        self.model = model or config.DEFAULT_MODEL
         self.api_key = api_key or config.get_api_key("gemini")
-        # Lazy import so students without the SDK get a clear error
         from google import genai
         self.client = genai.Client(api_key=self.api_key)
 
@@ -69,23 +68,71 @@ class GeminiProvider:
         """Send messages and return a structured response."""
         from google.genai import types
 
-        # Convert our messages to Gemini format
+        # Convert tool schemas to google.genai types
+        tool_declarations = None
+        if tools:
+            func_decls = []
+            for t in tools:
+                if isinstance(t, dict) and t.get("type") == "function":
+                    fn = t["function"]
+                    func_decls.append(
+                        types.FunctionDeclaration(
+                            name=fn["name"],
+                            description=fn.get("description", ""),
+                            parameters=fn.get("parameters"),
+                        )
+                    )
+            if func_decls:
+                tool_declarations = [types.Tool(function_declarations=func_decls)]
+
+        # Convert messages to Gemini format
         contents = []
         for msg in messages:
             if msg.role == "system":
-                continue  # Handled separately
-            contents.append(
-                types.Content(
-                    role="user" if msg.role == "user" else "model",
-                    parts=[types.Part(text=msg.content)],
+                continue  # Handled separately in system_instruction
+
+            if msg.role == "user":
+                contents.append(
+                    types.Content(
+                        role="user",
+                        parts=[types.Part(text=msg.content)],
+                    )
                 )
-            )
+            elif msg.role == "assistant":
+                parts = []
+                if msg.tool_calls:
+                    for tc in msg.tool_calls:
+                        parts.append(
+                            types.Part.from_function_call(
+                                name=tc["name"],
+                                args=tc["arguments"],
+                            )
+                        )
+                if msg.content:
+                    parts.insert(0, types.Part(text=msg.content))
+                if not parts:
+                    parts = [types.Part(text="")]
+                contents.append(types.Content(role="model", parts=parts))
+
+            elif msg.role == "tool":
+                contents.append(
+                    types.Content(
+                        role="user",
+                        parts=[
+                            types.Part.from_function_response(
+                                name=msg.tool_call_id or "tool",
+                                response={"result": msg.content},
+                            )
+                        ],
+                    )
+                )
 
         system_msgs = [m.content for m in messages if m.role == "system"]
         system_instruction = "\n".join(system_msgs) if system_msgs else None
 
         gen_config = types.GenerateContentConfig(
             system_instruction=system_instruction,
+            tools=tool_declarations,
         )
 
         response = self.client.models.generate_content(
@@ -96,6 +143,8 @@ class GeminiProvider:
 
         # Parse tool calls if present
         tool_calls = []
+        text_content = ""
+
         if response.candidates and response.candidates[0].content:
             for part in response.candidates[0].content.parts:
                 if hasattr(part, "function_call") and part.function_call:
@@ -107,9 +156,14 @@ class GeminiProvider:
                             arguments=dict(fc.args) if fc.args else {},
                         )
                     )
+                elif hasattr(part, "text") and part.text:
+                    text_content += part.text
+
+        if not text_content and not tool_calls and response.text:
+            text_content = response.text
 
         return ModelResponse(
-            content=response.text or "",
+            content=text_content,
             tool_calls=tool_calls,
             raw={"response": str(response)},
             usage={
