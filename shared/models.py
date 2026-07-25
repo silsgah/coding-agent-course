@@ -29,6 +29,7 @@ class Message:
     content: str
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     tool_call_id: str | None = None
+    raw_parts: Any = None
 
 
 @dataclass
@@ -46,6 +47,7 @@ class ModelResponse:
     tool_calls: list[ToolCall]
     raw: dict[str, Any]  # Full provider response for debugging
     usage: dict[str, int]  # {"prompt_tokens": ..., "completion_tokens": ...}
+    raw_parts: Any = None
 
 
 # ---------------------------------------------------------------------------
@@ -99,20 +101,23 @@ class GeminiProvider:
                     )
                 )
             elif msg.role == "assistant":
-                parts = []
-                if msg.tool_calls:
-                    for tc in msg.tool_calls:
-                        parts.append(
-                            types.Part.from_function_call(
-                                name=tc["name"],
-                                args=tc["arguments"],
+                if msg.raw_parts:
+                    contents.append(types.Content(role="model", parts=msg.raw_parts))
+                else:
+                    parts = []
+                    if msg.tool_calls:
+                        for tc in msg.tool_calls:
+                            parts.append(
+                                types.Part.from_function_call(
+                                    name=tc["name"],
+                                    args=tc["arguments"],
+                                )
                             )
-                        )
-                if msg.content:
-                    parts.insert(0, types.Part(text=msg.content))
-                if not parts:
-                    parts = [types.Part(text="")]
-                contents.append(types.Content(role="model", parts=parts))
+                    if msg.content:
+                        parts.insert(0, types.Part(text=msg.content))
+                    if not parts:
+                        parts = [types.Part(text="")]
+                    contents.append(types.Content(role="model", parts=parts))
 
             elif msg.role == "tool":
                 contents.append(
@@ -144,9 +149,11 @@ class GeminiProvider:
         # Parse tool calls if present
         tool_calls = []
         text_content = ""
+        raw_parts = None
 
         if response.candidates and response.candidates[0].content:
-            for part in response.candidates[0].content.parts:
+            raw_parts = response.candidates[0].content.parts
+            for part in raw_parts:
                 if hasattr(part, "function_call") and part.function_call:
                     fc = part.function_call
                     tool_calls.append(
@@ -166,6 +173,7 @@ class GeminiProvider:
             content=text_content,
             tool_calls=tool_calls,
             raw={"response": str(response)},
+            raw_parts=raw_parts,
             usage={
                 "prompt_tokens": getattr(response.usage_metadata, "prompt_token_count", 0) or 0,
                 "completion_tokens": getattr(response.usage_metadata, "candidates_token_count", 0) or 0,

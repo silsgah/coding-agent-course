@@ -124,6 +124,7 @@ async def agent_loop(user_message: str, history: list[Message]) -> str:
                         "name": tool_call.name,
                         "arguments": tool_call.arguments,
                     }],
+                    raw_parts=response.raw_parts,
                 ))
                 history.append(Message(
                     role="tool",
