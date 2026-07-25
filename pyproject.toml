@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "coding-agent-course"
+version = "0.1.0"
+description = "Building a Coding Agent From Scratch — 8-week course by EED Soft Consult"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [
+    { name = "EED Soft Consult", email = "contact@eedsoftconsult.com" }
+]
+dependencies = [
+    "google-genai>=0.1.0",
+    "openai>=1.0.0",
+    "rich>=13.0.0",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "docker>=7.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/silsgah/coding-agent-course"
+Repository = "https://github.com/silsgah/coding-agent-course"
+
+[tool.uv]
+dev-dependencies = []

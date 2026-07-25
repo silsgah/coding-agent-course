@@ -25,13 +25,12 @@
 > **Try it in 5 minutes, $0:**
 >
 > ```bash
-> git clone <repo-url>
+> git clone https://github.com/silsgah/coding-agent-course
 > cd coding-agent-course
-> python -m venv .venv && source .venv/bin/activate
-> pip install -r requirements.txt
+> uv venv && source .venv/bin/activate
+> uv pip install -r requirements.txt   # or simply: uv sync
 > cp .env.example .env   # set GEMINI_API_KEY — free at https://aistudio.google.com/apikey
-> cd week-01-bare-agent-loop/code
-> python agent.py
+> uv run week-01-bare-agent-loop/code/agent.py
 > ```
 >
 > Then type `What files are in the current directory?` and watch the agent loop in action — prompt → tool call → permission gate → answer.
@@ -214,10 +213,10 @@ Running the code costs **$0** if you stick to free tiers:
 ### 1. Clone and install
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/silsgah/coding-agent-course
 cd coding-agent-course
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+uv venv && source .venv/bin/activate
+uv pip install -r requirements.txt   # or simply: uv sync
 ```
 
 ### 2. Add your API key
@@ -230,8 +229,7 @@ cp .env.example .env
 ### 3. Run your first agent
 
 ```bash
-cd week-01-bare-agent-loop/code
-python agent.py
+uv run week-01-bare-agent-loop/code/agent.py
 ```
 
 You'll see an interactive prompt. Try these:
