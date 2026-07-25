@@ -34,3 +34,4 @@ sessions/
 logs/
 checkpoints/
 *.jsonl
+uv.lock
