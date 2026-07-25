@@ -1,0 +1,26 @@
+# =============================================================================
+# Coding Agent Course — Base Dependencies
+# =============================================================================
+
+# LLM Providers
+google-genai>=1.0.0
+openai>=1.0.0
+httpx>=0.27.0
+
+# Structured output
+pydantic>=2.0.0
+
+# Environment
+python-dotenv>=1.0.0
+
+# Async
+anyio>=4.0.0
+
+# CLI / Display
+rich>=13.0.0
+
+# Week 4: Sandboxing (optional)
+# docker>=7.0.0
+
+# Week 8: Observability (optional)
+# opik>=0.1.0
