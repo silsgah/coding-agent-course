@@ -205,11 +205,54 @@ class OpenAICompatibleProvider:
         tools: list[dict] | None = None,
     ) -> ModelResponse:
         """Send messages via the OpenAI-compatible chat completions API."""
+        formatted_messages = []
+        for m in messages:
+            if m.role == "assistant":
+                msg_dict: dict[str, Any] = {
+                    "role": "assistant",
+                    "content": m.content if m.content else None,
+                }
+                if m.tool_calls:
+                    formatted_tcs = []
+                    for tc in m.tool_calls:
+                        args_str = (
+                            json.dumps(tc["arguments"])
+                            if isinstance(tc["arguments"], dict)
+                            else str(tc["arguments"])
+                        )
+                        formatted_tcs.append(
+                            {
+                                "id": tc.get("id") or tc.get("name") or "call_1",
+                                "type": "function",
+                                "function": {
+                                    "name": tc["name"],
+                                    "arguments": args_str,
+                                },
+                            }
+                        )
+                    msg_dict["tool_calls"] = formatted_tcs
+                formatted_messages.append(msg_dict)
+
+            elif m.role == "tool":
+                formatted_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": m.tool_call_id or "call_1",
+                        "content": m.content or "",
+                    }
+                )
+
+            else:
+                formatted_messages.append(
+                    {
+                        "role": m.role,
+                        "content": m.content or "",
+                    }
+                )
+
         payload: dict[str, Any] = {
             "model": self.model,
-            "messages": [
-                {"role": m.role, "content": m.content} for m in messages
-            ],
+            "messages": formatted_messages,
         }
         if tools:
             payload["tools"] = tools
