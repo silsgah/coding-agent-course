@@ -25,5 +25,8 @@ dependencies = [
 Homepage = "https://github.com/silsgah/coding-agent-course"
 Repository = "https://github.com/silsgah/coding-agent-course"
 
-[tool.uv]
-dev-dependencies = []
+[tool.hatch.build.targets.wheel]
+packages = ["shared"]
+
+[dependency-groups]
+dev = []
