@@ -29,7 +29,7 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 # ---------------------------------------------------------------------------
 # Default model
 # ---------------------------------------------------------------------------
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gemini-2.5-flash")
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gemini-2.0-flash")
 
 
 def get_api_key(provider: str = "gemini") -> str:

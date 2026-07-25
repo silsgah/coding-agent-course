@@ -119,11 +119,10 @@ async def main() -> None:
     )
     validate_setup()
 
-    # Models to compare — adjust based on your API keys
     models = [
-        "gemini-2.5-flash",
+        "gemini-2.0-flash",
         # Uncomment if you have the API keys:
-        # "gemini-2.5-pro",
+        # "gemini-1.5-pro",
         # "gpt-4o-mini",
         # "claude-haiku-4-5",
     ]
