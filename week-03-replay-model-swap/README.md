@@ -80,11 +80,29 @@ cd week-03-replay-model-swap/code
 # First, generate a run to replay from
 python replay_harness.py --task "List the files here and create a summary.md"
 
-# Then replay with a different model
-python model_swap.py --original sessions/latest --model gemini-2.5-pro
+# Fork the exact same checkpoint prefix once per model
+python model_swap.py --original sessions/latest --from-step 1 \
+  --models gemini-2.0-flash gpt-4o-mini
 
 # Generate a comparison
-python comparison_report.py --runs sessions/original sessions/replayed
+python comparison_report.py --runs sessions/swap-* --output comparison_report.md
+```
+
+Each session contains an append-only `checkpoint.jsonl` log and a
+`run_metrics.json` summary. A replay branch copies its inherited event prefix,
+then appends a `replay_metadata` event and only its own new decisions. This
+makes the branch independently reproducible while preserving the source run.
+
+`--from-step 0` forks immediately after the user request. Higher values fork
+after that many completed tool calls. The harness rejects a step that does not
+exist rather than silently replaying the wrong state.
+
+## Test It
+
+The unit tests use local fixture checkpoints and do not call a model API:
+
+```bash
+python -m unittest discover -s week-03-replay-model-swap/tests -v
 ```
 
 ## Exercises

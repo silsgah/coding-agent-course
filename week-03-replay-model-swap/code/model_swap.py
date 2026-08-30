@@ -1,169 +1,56 @@
-"""
-Week 3 — Model Swap Comparison
-================================
-
-Run the same task from the same starting point with multiple models,
-then output a comparison table.
+"""Create one replay branch per model from exactly the same checkpoint.
 
 Usage:
-    python model_swap.py
+    python model_swap.py --original sessions/run-20260830-120000 \
+      --models gemini-2.0-flash gpt-4o-mini --from-step 1
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import sys
-import uuid
-from dataclasses import dataclass
 from pathlib import Path
-from datetime import datetime
-import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-
 from shared.config import validate_setup
-from shared.models import get_provider, Message
-from shared.utils import print_header, console
+from shared.utils import console, print_header
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "week-01-bare-agent-loop" / "code"))
-from tools import TOOL_SCHEMAS, execute_tool
-
-
-SYSTEM_PROMPT = """\
-You are a helpful coding assistant. Complete the task efficiently.
-"""
-
-DEMO_TASK = (
-    "List the Python files in the current directory, then create a brief "
-    "summary of what this project does based on the file names."
-)
+from replay_harness import replay_from, session_name
+from replay_core import RunMetrics
 
 
-@dataclass
-class RunResult:
-    """Result from one model run."""
-    model: str
-    answer: str
-    tool_calls: int
-    prompt_tokens: int
-    completion_tokens: int
-    elapsed_seconds: float
-    error: str | None = None
+def safe_model_name(model: str) -> str:
+    """Make a readable directory suffix without treating model text as a path."""
+    return "".join(character if character.isalnum() else "-" for character in model).strip("-")
 
 
-async def run_with_model(task: str, model: str) -> RunResult:
-    """Run a task with a specific model and return metrics."""
-    start_time = time.perf_counter()
-    tool_call_count = 0
-    total_prompt = 0
-    total_completion = 0
-
-    try:
-        provider = get_provider(model=model)
-        history = [
-            Message(role="system", content=SYSTEM_PROMPT),
-            Message(role="user", content=task),
-        ]
-
-        for iteration in range(10):
-            response = await provider.chat(history, tools=TOOL_SCHEMAS)
-            total_prompt += response.usage.get("prompt_tokens", 0)
-            total_completion += response.usage.get("completion_tokens", 0)
-
-            if response.tool_calls:
-                for tc in response.tool_calls:
-                    tool_call_count += 1
-                    result = execute_tool(tc.name, tc.arguments)
-                    history.append(Message(
-                        role="assistant", content="",
-                        tool_calls=[{"id": tc.id, "name": tc.name, "arguments": tc.arguments}],
-                    ))
-                    history.append(Message(role="tool", content=result, tool_call_id=tc.id))
-                continue
-
-            if response.content:
-                return RunResult(
-                    model=model,
-                    answer=response.content,
-                    tool_calls=tool_call_count,
-                    prompt_tokens=total_prompt,
-                    completion_tokens=total_completion,
-                    elapsed_seconds=time.perf_counter() - start_time,
-                )
-
-        return RunResult(
-            model=model,
-            answer="(reached max iterations)",
-            tool_calls=tool_call_count,
-            prompt_tokens=total_prompt,
-            completion_tokens=total_completion,
-            elapsed_seconds=time.perf_counter() - start_time,
-        )
-
-    except Exception as e:
-        return RunResult(
-            model=model,
-            answer="",
-            tool_calls=tool_call_count,
-            prompt_tokens=total_prompt,
-            completion_tokens=total_completion,
-            elapsed_seconds=time.perf_counter() - start_time,
-            error=str(e),
-        )
+async def run_model_swap(original: Path, models: list[str], from_step: int, sessions_dir: Path) -> list[tuple[Path, RunMetrics]]:
+    """Replay an identical checkpoint prefix once for each requested model."""
+    results: list[tuple[Path, RunMetrics]] = []
+    for model in models:
+        target = sessions_dir / f"{session_name('swap')}-{safe_model_name(model)}"
+        console.print(f"[cyan]Replaying with {model}...[/cyan]")
+        results.append((target, await replay_from(original, from_step, target, model)))
+    return results
 
 
 async def main() -> None:
-    print_header(
-        "Week 3 — Model Swap Comparison",
-        "Same task, same tools, different models",
-    )
+    parser = argparse.ArgumentParser(description="Compare models by replaying one checkpoint")
+    parser.add_argument("--original", required=True, help="Checkpoint session to fork")
+    parser.add_argument("--models", nargs="+", required=True, help="Models to compare")
+    parser.add_argument("--from-step", type=int, default=0, help="Completed tool step at which to fork")
+    parser.add_argument("--sessions-dir", default="sessions", help="Directory for new replay branches")
+    args = parser.parse_args()
+
+    print_header("Week 3 — Model Swap", "Same checkpoint prefix, same tools, different model")
     validate_setup()
-
-    models = [
-        "gemini-2.0-flash",
-        # Uncomment if you have the API keys:
-        # "gemini-1.5-pro",
-        # "gpt-4o-mini",
-        # "claude-haiku-4-5",
-    ]
-
-    console.print(f"\n[bold]Task:[/bold] {DEMO_TASK}")
-    console.print(f"[bold]Models:[/bold] {', '.join(models)}\n")
-
-    results: list[RunResult] = []
-    for model in models:
-        console.print(f"[cyan]Running with {model}...[/cyan]")
-        result = await run_with_model(DEMO_TASK, model)
-        results.append(result)
-        if result.error:
-            console.print(f"[red]  Error: {result.error}[/red]")
-        else:
-            console.print(f"[green]  Done in {result.elapsed_seconds:.1f}s, "
-                          f"{result.tool_calls} tool calls[/green]")
-
-    # Print comparison table
-    console.print("\n[bold]═══ Comparison Report ═══[/bold]\n")
-
-    from rich.table import Table
-    table = Table(title="Model Comparison", show_lines=True)
-    table.add_column("Metric", style="bold")
-    for r in results:
-        table.add_column(r.model, justify="center")
-
-    table.add_row("Tool Calls", *[str(r.tool_calls) for r in results])
-    table.add_row("Prompt Tokens", *[str(r.prompt_tokens) for r in results])
-    table.add_row("Completion Tokens", *[str(r.completion_tokens) for r in results])
-    table.add_row("Total Tokens", *[str(r.prompt_tokens + r.completion_tokens) for r in results])
-    table.add_row("Time (seconds)", *[f"{r.elapsed_seconds:.1f}" for r in results])
-    table.add_row("Error", *[r.error or "—" for r in results])
-
-    console.print(table)
-
-    # Print answers side by side
-    console.print("\n[bold]═══ Answers ═══[/bold]")
-    for r in results:
-        console.print(f"\n[bold cyan]── {r.model} ──[/bold cyan]")
-        console.print(r.answer[:500] if r.answer else "(no answer)")
+    results = await run_model_swap(Path(args.original), args.models, args.from_step, Path(args.sessions_dir))
+    console.print("\n[bold]Results[/bold]")
+    for directory, metrics in results:
+        status = metrics.error or "complete"
+        console.print(f"• {metrics.model}: {metrics.tool_calls} tool call(s), {metrics.total_tokens} tokens, {status} — {directory}")
+    console.print("\nRun comparison_report.py with the listed directories to produce a Markdown report.")
 
 
 if __name__ == "__main__":
