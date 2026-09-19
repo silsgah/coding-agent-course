@@ -104,6 +104,16 @@ python permission_modes.py --mode full-trust
 python docker_workspace.py
 ```
 
+Docker command execution **fails closed** when Docker is unavailable. The
+teaching-only `--allow-host-execution` flag is an explicit opt-in and must not
+be used for unattended or untrusted work.
+
+## Test It
+
+```bash
+python -m unittest discover -s week-04-containment-sandboxing/tests -v
+```
+
 ## Exercises
 
 See [exercises/exercises.md](exercises/exercises.md)

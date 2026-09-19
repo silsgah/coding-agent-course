@@ -7,12 +7,11 @@
 ## Executive Summary
 
 The course has a clear learning progression and the strongest recent modules
-(Weeks 3, 5, 6, and 7) now have deterministic tests and honest operational
-boundaries. It is **not yet safe to describe the whole course as
-production-grade**. Two issues block that label:
+(Weeks 3–7) now have deterministic tests and honest operational boundaries. It
+is **not yet safe to describe the whole course as production-grade**. One
+remaining P0 issue blocks that label:
 
-1. Week 4 silently falls back to host-shell execution when Docker is absent.
-2. Week 8 executes benchmark validators with Python `eval()` and invokes host
+1. Week 8 executes benchmark validators with Python `eval()` and invokes host
    tools while changing process-global working directory.
 
 Fix those before expanding the capstone or marketing the course as a secure
@@ -32,8 +31,8 @@ issue-to-PR system.
 
 | Gate | Requirement | Current status | Required action |
 | --- | --- | --- | --- |
-| Safety | No silent host execution when sandbox setup fails | Blocked | Week 4 must fail closed or require an explicit `--allow-host-execution` opt-in. |
-| Isolation | Workspace paths are robust against sibling-prefix and symlink escapes | Partial | Replace string-prefix checks with resolved-path ancestry checks; add tests. |
+| Safety | No silent host execution when sandbox setup fails | Code fixed | Week 4 now fails closed; run a real Docker integration check in CI. |
+| Isolation | Workspace paths are robust against sibling-prefix and symlink escapes | Code fixed | Week 4 now uses resolved-path ancestry checks; retain regression tests. |
 | Evaluation safety | No executable validator strings | Blocked | Replace Week 8 `eval()` with typed validator callables or declarative checks. |
 | Eval isolation | Every benchmark uses a scoped executor/workspace | Blocked | Remove process-global `chdir`; inject a sandboxed executor. |
 | Testability | Every week has offline deterministic checks | Partial | Add dedicated tests for Weeks 1, 2, 4, and 8. |
@@ -71,16 +70,14 @@ directly through host tools. Cost figures must remain explicitly approximate.
 
 ### Week 4 — Containment and Sandboxing
 
-**P0 issue:** `DockerSandbox` prints a warning then falls back to local shell
-execution when Docker is unavailable. This reverses the stated containment
-guarantee.
+**Remediated in Week 4 hardening:** Docker unavailability now fails closed;
+host execution requires the explicit `--allow-host-execution` teaching flag.
+Docker receives its command as an argument array rather than host-side quoted
+interpolation, and file tools use resolved-path ancestry checks. Four offline
+tests cover those contracts.
 
-**P0 issue:** The Docker command is interpolated into `bash -c '…'`; quoting is
-not safe for arbitrary shell input. File path containment uses a string prefix,
-which can accept sibling-prefix paths such as `/work/app-old` for `/work/app`.
-
-**Action:** Fail closed by default, use a safe command transport, use resolved
-path ancestry checks, and add container/host-fallback contract tests.
+**Remaining check:** Add a Docker-enabled integration job to confirm container
+limits, network isolation, and cleanup on the supported CI runner.
 
 ### Week 5 — Context Budget
 
@@ -146,15 +143,13 @@ Before publishing an installment, verify all of the following:
 
 ## Remediation Order
 
-1. **Week 4 hardening** — remove host fallback; fix command and path handling;
-   add tests.
-2. **Week 8 completion** — replace `eval`, scope execution, implement every
+1. **Week 8 completion** — replace `eval`, scope execution, implement every
    advertised command, add regression tests and a dry-run capstone.
-3. **Weeks 1–2 tests** — establish the baseline contracts that later lessons
+2. **Weeks 1–2 tests** — establish the baseline contracts that later lessons
    depend on.
-4. **Article completion** — create/review all missing drafts against the
+3. **Article completion** — create/review all missing drafts against the
    article standard.
-5. **Consolidation** — extract shared runtime, executor, reporting, and test
+4. **Consolidation** — extract shared runtime, executor, reporting, and test
    fixtures into one package only after the lesson examples are proven.
 
 ## Definition of Done for the Course
