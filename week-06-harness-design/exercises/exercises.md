@@ -1,7 +1,7 @@
 # Week 6 — Exercises
 
 ## Exercise 1: Add a tool by adding a method
-Add a `search_code(pattern: str, path: str = ".")` method to `CodingAgent`. Notice: no schema to update, no registry to modify. Just add the method and update `_get_tool_schemas()`.
+Add a decorated `search_code(pattern: str, path: str = ".")` method to `CodingAgent`. Notice: no schema to update and no registry to modify. `tool_schemas()` discovers the method from its signature and docstring.
 
 ## Exercise 2: Subclass for a specialized agent
 Create a `PythonAgent(CodingAgent)` that adds Python-specific methods like `run_tests()`, `lint_code()`, and `format_code()`. The parent's tools are inherited automatically.

@@ -101,6 +101,26 @@ python refactor_demo.py
 python benchmark.py
 ```
 
+The two comparison commands are offline and deterministic. `benchmark.py`
+uses a scripted provider to verify the full provider → method → tool result →
+answer path; it is a harness smoke test, not a claim about live-model quality.
+
+## Safety and production boundary
+
+`CodingAgent` constrains file tools to its configured workspace, derives its
+schemas from decorated methods, validates arguments before dispatch, limits
+tool output, and rejects shell composition and a small set of destructive
+commands. These controls reduce common mistakes; they are not a security
+boundary. A process that can execute commands must still run inside the Week 4
+sandbox with least-privilege permissions before it is exposed to untrusted
+tasks or data.
+
+## Test It
+
+```bash
+python -m unittest discover -s week-06-harness-design/tests -v
+```
+
 ## Exercises
 
 See [exercises/exercises.md](exercises/exercises.md)
