@@ -1,63 +1,98 @@
-"""
-Week 8 — Benchmark Suite
-==========================
+"""Safe, repeatable benchmark primitives for Week 8.
 
-Repeatable task evaluation for coding agents.
-
-Defines tasks with expected outcomes and scores agent performance:
-- Did the file get created with correct content?
-- Did the agent use the right tools?
-- Was the answer accurate?
-
-Inspired by:
-- DecodingAI's eval framework (evals/)
-- NOOA's benchmark methodology
+Validators are Python callables chosen by the harness, never model-provided
+strings evaluated at runtime. Each benchmark owns a temporary workspace and a
+scoped executor; the runner never changes the process working directory.
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 import sys
-import time
 import tempfile
-import shutil
-from dataclasses import dataclass, field
+import time
+from collections.abc import Callable
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-
-from shared.config import validate_setup, DEFAULT_MODEL
-from shared.models import get_provider, Message
-from shared.utils import print_header, console
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "week-01-bare-agent-loop" / "code"))
-from tools import TOOL_SCHEMAS, execute_tool
-
-from rich.table import Table
+from shared.config import DEFAULT_MODEL, validate_setup
+from shared.models import Message, ModelResponse, get_provider
+from shared.utils import console, print_header
 
 
-# ---------------------------------------------------------------------------
-# Benchmark task definitions
-# ---------------------------------------------------------------------------
-@dataclass
+Validator = Callable[[Path, str], bool]
+Setup = Callable[[Path], None]
+ProviderFactory = Callable[[], Any]
+
+TOOL_SCHEMAS = [
+    {"type": "function", "function": {"name": "read_file", "description": "Read one UTF-8 text file in the benchmark workspace.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}},
+    {"type": "function", "function": {"name": "write_file", "description": "Write one UTF-8 text file in the benchmark workspace.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}}},
+    {"type": "function", "function": {"name": "list_files", "description": "List direct entries in a benchmark workspace directory.", "parameters": {"type": "object", "properties": {"path": {"type": "string", "default": "."}}}}},
+]
+
+
+def workspace_path(workspace: Path, path: str) -> Path:
+    """Resolve a benchmark path and reject escapes through paths or symlinks."""
+    root = workspace.resolve()
+    target = (root / path).resolve()
+    if target != root and root not in target.parents:
+        raise ValueError("Path escapes benchmark workspace")
+    return target
+
+
+class WorkspaceExecutor:
+    """Minimal deterministic tool surface for benchmark fixtures."""
+
+    def __init__(self, workspace: Path):
+        self.workspace = workspace.resolve()
+
+    def execute(self, name: str, arguments: dict[str, Any]) -> str:
+        try:
+            path = workspace_path(self.workspace, str(arguments.get("path", ".")))
+            if name == "read_file":
+                if not path.is_file():
+                    return f"Error: File not found: {arguments.get('path')}"
+                return path.read_text(encoding="utf-8", errors="replace")[:50_000]
+            if name == "write_file":
+                path.parent.mkdir(parents=True, exist_ok=True)
+                content = str(arguments.get("content", ""))
+                path.write_text(content, encoding="utf-8")
+                return f"Written {len(content)} characters to {path.relative_to(self.workspace)}"
+            if name == "list_files":
+                if not path.is_dir():
+                    return f"Error: Directory not found: {arguments.get('path', '.')}"
+                return "\n".join(entry.name for entry in sorted(path.iterdir())) or "(empty directory)"
+            return f"Error: Unknown benchmark tool: {name}"
+        except (OSError, ValueError) as exc:
+            return f"Error: {exc}"
+
+
+@dataclass(frozen=True)
 class BenchmarkTask:
-    """A single benchmark task with expected outcome."""
     name: str
     prompt: str
-    validator: str  # Python expression to validate (using `result` and `workspace`)
+    validator: Validator
     category: str = "general"
     max_tokens: int = 10_000
     max_iterations: int = 8
+    setup: Setup | None = None
+
+    def __post_init__(self) -> None:
+        if not callable(self.validator):
+            raise TypeError("Benchmark validators must be trusted callables")
+        if self.max_tokens <= 0 or self.max_iterations <= 0:
+            raise ValueError("Benchmark budgets must be positive")
 
 
-@dataclass
+@dataclass(frozen=True)
 class BenchmarkResult:
-    """Result of running one benchmark task."""
     task_name: str
     passed: bool
-    score: float  # 0.0 to 1.0
+    score: float
     tokens_used: int
     tool_calls: int
     elapsed_seconds: float
@@ -65,183 +100,98 @@ class BenchmarkResult:
     agent_answer: str = ""
 
 
-# Built-in benchmark tasks
+def contains_greet(workspace: Path, _: str) -> bool:
+    path = workspace / "hello.py"
+    return path.is_file() and "def greet" in path.read_text(encoding="utf-8")
+
+
+def contains_number(_: Path, answer: str) -> bool:
+    return any(character.isdigit() for character in answer)
+
+
+def reports_total(_: Path, answer: str) -> bool:
+    return "15" in answer
+
+
+def creates_output_files(workspace: Path, _: str) -> bool:
+    return all((workspace / "output" / name).is_file() for name in ("a.txt", "b.txt", "c.txt"))
+
+
+def reports_missing_file(_: Path, answer: str) -> bool:
+    return any(word in answer.lower() for word in ("not", "error", "exist"))
+
+
+def setup_number_fixture(workspace: Path) -> None:
+    (workspace / "test_data.txt").write_text("1\n2\n3\n4\n5\n", encoding="utf-8")
+
+
 BENCHMARK_TASKS = [
-    BenchmarkTask(
-        name="create_file",
-        prompt="Create a file called 'hello.py' with a function called 'greet' that takes a name parameter and returns 'Hello, {name}!'",
-        validator="(workspace / 'hello.py').exists() and 'def greet' in (workspace / 'hello.py').read_text()",
-        category="file_creation",
-    ),
-    BenchmarkTask(
-        name="list_and_summarize",
-        prompt="List all files in the current directory and tell me how many there are.",
-        validator="any(c.isdigit() for c in result)",  # Answer should contain a number
-        category="exploration",
-    ),
-    BenchmarkTask(
-        name="read_and_extract",
-        prompt="Read the file 'test_data.txt' and tell me the total of all the numbers in it.",
-        validator="'15' in result",  # 1+2+3+4+5 = 15
-        category="analysis",
-    ),
-    BenchmarkTask(
-        name="multi_step",
-        prompt="Create a directory called 'output', then create three files in it: a.txt, b.txt, c.txt, each containing their own filename.",
-        validator="all((workspace / 'output' / f).exists() for f in ['a.txt', 'b.txt', 'c.txt'])",
-        category="multi_step",
-    ),
-    BenchmarkTask(
-        name="error_handling",
-        prompt="Try to read a file called 'nonexistent_file_xyz.txt' and gracefully report that it doesn't exist.",
-        validator="'not' in result.lower() or 'error' in result.lower() or 'exist' in result.lower()",
-        category="error_handling",
-    ),
+    BenchmarkTask("create_file", "Create hello.py with a greet(name) function that returns a greeting.", contains_greet, "file_creation"),
+    BenchmarkTask("list_and_summarize", "List all files in the current directory and say how many there are.", contains_number, "exploration"),
+    BenchmarkTask("read_and_extract", "Read test_data.txt and report the total of its numbers.", reports_total, "analysis", setup=setup_number_fixture),
+    BenchmarkTask("multi_step", "Create output/a.txt, output/b.txt, and output/c.txt, each containing its filename.", creates_output_files, "multi_step"),
+    BenchmarkTask("error_handling", "Try to read nonexistent_file_xyz.txt and gracefully report that it does not exist.", reports_missing_file, "error_handling"),
 ]
 
 
-# ---------------------------------------------------------------------------
-# Benchmark runner
-# ---------------------------------------------------------------------------
-async def run_benchmark_task(
-    task: BenchmarkTask,
-    workspace: Path,
-) -> BenchmarkResult:
-    """Run a single benchmark task and evaluate the result."""
-    start = time.perf_counter()
-    total_tokens = 0
-    tool_calls = 0
-
+async def run_benchmark_task(task: BenchmarkTask, workspace: Path, provider_factory: ProviderFactory = get_provider) -> BenchmarkResult:
+    """Run one task in its supplied workspace and validate via a trusted callable."""
+    started = time.perf_counter()
+    tokens_used = tool_calls = 0
+    executor = WorkspaceExecutor(workspace)
     try:
-        provider = get_provider()
-        history = [
-            Message(role="system", content="You are a coding assistant. Complete the task precisely."),
-            Message(role="user", content=task.prompt),
-        ]
-
-        for iteration in range(task.max_iterations):
-            response = await provider.chat(history, tools=TOOL_SCHEMAS)
-            total_tokens += (
-                response.usage.get("prompt_tokens", 0) +
-                response.usage.get("completion_tokens", 0)
-            )
-
-            if total_tokens > task.max_tokens:
-                break
-
+        provider = provider_factory()
+        history = [Message(role="system", content="You are a coding assistant. Complete the task using only the supplied tools."), Message(role="user", content=task.prompt)]
+        for _ in range(task.max_iterations):
+            response: ModelResponse = await provider.chat(history, tools=TOOL_SCHEMAS)
+            tokens_used += response.usage.get("prompt_tokens", 0) + response.usage.get("completion_tokens", 0)
+            if tokens_used > task.max_tokens:
+                return BenchmarkResult(task.name, False, 0.0, tokens_used, tool_calls, time.perf_counter() - started, "Token budget exceeded")
             if response.tool_calls:
-                for tc in response.tool_calls:
+                for call in response.tool_calls:
                     tool_calls += 1
-                    result = execute_tool(tc.name, tc.arguments)
-                    history.append(Message(
-                        role="assistant", content="",
-                        tool_calls=[{"id": tc.id, "name": tc.name, "arguments": tc.arguments}],
-                    ))
-                    history.append(Message(role="tool", content=result, tool_call_id=tc.id))
+                    result = executor.execute(call.name, call.arguments)
+                    history.extend([Message(role="assistant", content="", tool_calls=[{"id": call.id, "name": call.name, "arguments": call.arguments}]), Message(role="tool", content=result, tool_call_id=call.id)])
                 continue
-
             if response.content:
-                result = response.content
-                elapsed = time.perf_counter() - start
-
-                # Validate
-                try:
-                    passed = eval(task.validator, {"result": result, "workspace": workspace})
-                except Exception as e:
-                    passed = False
-
-                return BenchmarkResult(
-                    task_name=task.name,
-                    passed=bool(passed),
-                    score=1.0 if passed else 0.0,
-                    tokens_used=total_tokens,
-                    tool_calls=tool_calls,
-                    elapsed_seconds=elapsed,
-                    agent_answer=result[:200],
-                )
-
-        return BenchmarkResult(
-            task_name=task.name, passed=False, score=0.0,
-            tokens_used=total_tokens, tool_calls=tool_calls,
-            elapsed_seconds=time.perf_counter() - start,
-            error="Max iterations reached",
-        )
-
-    except Exception as e:
-        return BenchmarkResult(
-            task_name=task.name, passed=False, score=0.0,
-            tokens_used=total_tokens, tool_calls=tool_calls,
-            elapsed_seconds=time.perf_counter() - start,
-            error=str(e),
-        )
+                passed = bool(task.validator(workspace, response.content))
+                return BenchmarkResult(task.name, passed, float(passed), tokens_used, tool_calls, time.perf_counter() - started, agent_answer=response.content[:500])
+            return BenchmarkResult(task.name, False, 0.0, tokens_used, tool_calls, time.perf_counter() - started, "Model returned no tool call or answer")
+        return BenchmarkResult(task.name, False, 0.0, tokens_used, tool_calls, time.perf_counter() - started, "Iteration budget exceeded")
+    except Exception as exc:
+        return BenchmarkResult(task.name, False, 0.0, tokens_used, tool_calls, time.perf_counter() - started, str(exc))
 
 
-async def run_benchmark_suite(tasks: list[BenchmarkTask] | None = None) -> list[BenchmarkResult]:
-    """Run all benchmark tasks and return results."""
-    tasks = tasks or BENCHMARK_TASKS
+async def run_benchmark_suite(tasks: list[BenchmarkTask] | None = None, provider_factory: ProviderFactory = get_provider) -> list[BenchmarkResult]:
+    """Run each task in an isolated temporary workspace without changing CWD."""
     results = []
-
-    for task in tasks:
-        # Each task gets a fresh workspace
-        workspace = Path(tempfile.mkdtemp(prefix=f"bench-{task.name}-"))
-
-        # Setup: create test data if needed
-        if task.name == "read_and_extract":
-            (workspace / "test_data.txt").write_text("1\n2\n3\n4\n5\n")
-
-        import os
-        original_dir = os.getcwd()
-        os.chdir(workspace)
-
-        console.print(f"\n[cyan]Running: {task.name}...[/cyan]")
-        result = await run_benchmark_task(task, workspace)
-        results.append(result)
-
-        status = "[green]✅ PASS[/green]" if result.passed else "[red]❌ FAIL[/red]"
-        console.print(f"  {status} ({result.tokens_used} tokens, {result.elapsed_seconds:.1f}s)")
-        if result.error:
-            console.print(f"  [red]Error: {result.error}[/red]")
-
-        os.chdir(original_dir)
-        shutil.rmtree(workspace, ignore_errors=True)
-
+    for task in tasks or BENCHMARK_TASKS:
+        with tempfile.TemporaryDirectory(prefix=f"bench-{task.name}-") as directory:
+            workspace = Path(directory)
+            if task.setup:
+                task.setup(workspace)
+            result = await run_benchmark_task(task, workspace, provider_factory)
+            results.append(result)
     return results
 
 
-def print_results(results: list[BenchmarkResult]) -> None:
-    """Print a summary table of benchmark results."""
-    table = Table(title=f"Benchmark Results — {DEFAULT_MODEL}", show_lines=True)
-    table.add_column("Task", style="bold")
-    table.add_column("Status", justify="center")
-    table.add_column("Tokens", justify="right")
-    table.add_column("Tools", justify="right")
-    table.add_column("Time", justify="right")
-
-    for r in results:
-        status = "[green]PASS[/green]" if r.passed else "[red]FAIL[/red]"
-        table.add_row(r.task_name, status, str(r.tokens_used),
-                      str(r.tool_calls), f"{r.elapsed_seconds:.1f}s")
-
-    passed = sum(1 for r in results if r.passed)
-    total = len(results)
-    total_tokens = sum(r.tokens_used for r in results)
-
-    table.add_row(
-        f"[bold]Total: {passed}/{total}[/bold]", "",
-        f"[bold]{total_tokens}[/bold]", "",
-        f"[bold]{sum(r.elapsed_seconds for r in results):.1f}s[/bold]",
-    )
-
-    console.print(table)
-    console.print(f"\n[bold]Pass rate: {passed}/{total} ({100*passed/total:.0f}%)[/bold]")
+def write_results(results: list[BenchmarkResult], output: Path) -> None:
+    """Write machine-readable benchmark results for regression comparison."""
+    output.write_text(json.dumps([asdict(result) for result in results], indent=2) + "\n", encoding="utf-8")
 
 
 async def main() -> None:
+    parser = argparse.ArgumentParser(description="Run isolated Week 8 benchmark tasks")
+    parser.add_argument("--json-out", type=Path, help="Optional JSON results file")
+    args = parser.parse_args()
     print_header("Week 8 — Benchmark Suite", f"Model: {DEFAULT_MODEL}")
     validate_setup()
-
     results = await run_benchmark_suite()
-    print_results(results)
+    for result in results:
+        print(f"{'PASS' if result.passed else 'FAIL'} {result.task_name}: {result.tokens_used} tokens, {result.elapsed_seconds:.2f}s")
+    if args.json_out:
+        write_results(results, args.json_out)
+        console.print(f"[green]Results written to {args.json_out}[/green]")
 
 
 if __name__ == "__main__":

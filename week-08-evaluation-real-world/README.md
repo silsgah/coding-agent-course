@@ -45,7 +45,7 @@ This is the evaluation infrastructure that separates a demo from a product.
 └──────────────────────────────────────────────────────────────┘
 ```
 
-## The GitHub Issue → PR Pipeline
+## The Issue → Review Pipeline
 
 The capstone ties everything together:
 
@@ -53,9 +53,9 @@ The capstone ties everything together:
 2. The system **decomposes** the issue into subtasks (Week 7)
 3. A **swarm of agents** works the subtasks in parallel
 4. Each agent works in its own **sandbox** (Week 4)
-5. Results are **merged** and a **PR** is created
-6. An **LLM reviewer** checks the PR for quality
-7. The PR is **submitted** for human review
+5. Results are **merged** into a review packet
+6. A reviewer checks the diff, test output, and benchmark evidence
+7. A human approves any branch push or PR creation through an authorized integration
 
 ## Code Walkthrough
 
@@ -66,15 +66,13 @@ Defines a set of benchmark tasks with expected outcomes:
 - Code analysis tasks (did the agent identify the correct issues?)
 - Multi-step tasks (did all steps complete successfully?)
 
-### `github_issue_agent.py` — Issue → PR pipeline
+### `github_issue_agent.py` — Issue → review packet
 
 The full end-to-end flow:
-1. Parse a GitHub issue (or a local issue file)
-2. Decompose into subtasks
-3. Run the swarm (Week 7)
-4. Collect changes
-5. Generate a PR description
-6. Run the eval suite on the result
+1. Parses local issue text
+2. Generates a staged plan with explicit authority boundaries
+3. Records the required sandbox, test, benchmark, and approval evidence
+4. Makes no external GitHub or repository write
 
 ### `capstone_template.py` — Capstone project scaffold
 
@@ -93,7 +91,7 @@ cd week-08-evaluation-real-world/code
 # Run the benchmark suite
 python benchmark_suite.py
 
-# End-to-end issue → PR demo
+# Local issue → review-packet demo (no GitHub writes)
 python github_issue_agent.py --issue "Add input validation to the CLI"
 
 # Capstone template

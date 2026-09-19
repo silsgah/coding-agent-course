@@ -7,25 +7,20 @@
 ## Executive Summary
 
 The course has a clear learning progression and the strongest recent modules
-(Weeks 3–7) now have deterministic tests and honest operational boundaries. It
-is **not yet safe to describe the whole course as production-grade**. One
-remaining P0 issue blocks that label:
-
-1. Week 8 executes benchmark validators with Python `eval()` and invokes host
-   tools while changing process-global working directory.
-
-Fix those before expanding the capstone or marketing the course as a secure
-issue-to-PR system.
+(Weeks 3–8) now have deterministic tests and honest operational boundaries.
+It is **not yet safe to describe the whole course as production-grade**. The
+original P0 code-safety issues are remediated; the remaining release work is
+integration coverage, baseline tests, and article completion.
 
 ## Evidence Collected
 
 - All Python files under `week-*/code/` compile with `py_compile`.
-- Existing offline suites pass: Week 3 (6 tests), Week 5 (6), Week 6 (6), and
-  Week 7 (6): **24 tests total**.
-- Weeks 1, 2, 4, and 8 currently have no dedicated automated test directory.
+- Existing offline suites pass: Week 3 (6 tests), Week 4 (4), Week 5 (6), Week
+  6 (6), Week 7 (6), and Week 8 (5): **33 tests total**.
+- Weeks 1 and 2 currently have no dedicated automated test directory.
 - Substack drafts exist for Weeks 3, 5, and 7 only.
-- The Week 8 README names `github_issue_agent.py` and `capstone_template.py`,
-  but neither file currently exists.
+- Week 8 includes a safe local issue review-packet command and a non-overwriting
+  capstone template; neither makes external GitHub writes.
 
 ## Release Gates
 
@@ -33,10 +28,10 @@ issue-to-PR system.
 | --- | --- | --- | --- |
 | Safety | No silent host execution when sandbox setup fails | Code fixed | Week 4 now fails closed; run a real Docker integration check in CI. |
 | Isolation | Workspace paths are robust against sibling-prefix and symlink escapes | Code fixed | Week 4 now uses resolved-path ancestry checks; retain regression tests. |
-| Evaluation safety | No executable validator strings | Blocked | Replace Week 8 `eval()` with typed validator callables or declarative checks. |
-| Eval isolation | Every benchmark uses a scoped executor/workspace | Blocked | Remove process-global `chdir`; inject a sandboxed executor. |
-| Testability | Every week has offline deterministic checks | Partial | Add dedicated tests for Weeks 1, 2, 4, and 8. |
-| Documentation | Every advertised command exists and is runnable | Partial | Implement or remove the missing Week 8 issue/PR and capstone commands. |
+| Evaluation safety | No executable validator strings | Code fixed | Week 8 uses trusted validator callables; retain regression tests. |
+| Eval isolation | Every benchmark uses a scoped executor/workspace | Code fixed | Week 8 uses a workspace executor and does not change process CWD. |
+| Testability | Every week has offline deterministic checks | Partial | Add dedicated tests for Weeks 1 and 2. |
+| Documentation | Every advertised command exists and is runnable | Code fixed | Week 8 now provides safe local review-packet and template commands. |
 | Publishing | Each post matches code, evidence, and series structure | Partial | Add drafts for Weeks 1, 2, 4, 6, and 8; then run the article checklist below. |
 
 ## Findings by Week
@@ -107,20 +102,18 @@ before enabling write-capable children or unattended runs.
 
 ### Week 8 — Evaluation and Capstone
 
-**P0 issue:** `BenchmarkTask.validator` stores a Python expression and
-`run_benchmark_task()` calls `eval()` against it. Validators should be typed
-callables or declarative assertions, never strings executed at runtime.
+**Remediated in Week 8 hardening:** Validators are trusted callables, never
+runtime-evaluated strings. Each task uses a scoped workspace executor and the
+runner does not mutate process CWD. Results can be written as JSON. Five offline
+tests cover those safety and fixture contracts.
 
-**P0 issue:** Benchmarks call the Week 1 host executor and mutate the
-process-wide CWD. This makes concurrent evaluation unsafe and can leak
-side-effects outside the temporary workspace.
+**Documentation gap resolved:** The advertised issue and capstone commands now
+generate a local review packet and non-overwriting capstone template. They make
+no GitHub writes; an authorized integration and human review remain required to
+open a PR.
 
-**Documentation gap:** The README advertises missing `github_issue_agent.py`
-and `capstone_template.py` commands.
-
-**Action:** Make Week 8 the next implementation milestone: safe evaluator
-contracts, per-task executors, fixture setup/teardown, JSON results, regression
-thresholds, and a local dry-run issue-to-review artifact before GitHub writes.
+**Remaining work:** Add regression thresholds and a sandbox-backed integration
+run before treating benchmark results as a release gate.
 
 ## Article Standard
 
@@ -143,10 +136,10 @@ Before publishing an installment, verify all of the following:
 
 ## Remediation Order
 
-1. **Week 8 completion** — replace `eval`, scope execution, implement every
-   advertised command, add regression tests and a dry-run capstone.
-2. **Weeks 1–2 tests** — establish the baseline contracts that later lessons
+1. **Weeks 1–2 tests** — establish the baseline contracts that later lessons
    depend on.
+2. **Integration coverage** — add Docker-enabled Week 4 and sandbox-backed
+   Week 8 runs, then define regression thresholds.
 3. **Article completion** — create/review all missing drafts against the
    article standard.
 4. **Consolidation** — extract shared runtime, executor, reporting, and test
