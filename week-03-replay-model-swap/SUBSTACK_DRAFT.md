@@ -22,6 +22,13 @@ This is the third installment in my *Building a Coding Agent From Scratch* serie
 
 The code for this lesson is in the [course repository](https://github.com/silsgah/coding-agent-course/tree/master/week-03-replay-model-swap).
 
+## Series navigation
+
+- [Week 1 — Why the Agent Loop is 20 Lines of Code](https://kwablagah.substack.com/p/why-the-agent-loop-is-20-lines-of?r=bpg99)
+- [Week 2 — Your Coding Agent Has a Fatal Flaw](https://kwablagah.substack.com/p/your-coding-agent-has-a-fatal-flaw?r=bpg99)
+- **Week 3 — Replay the Decision, Not the Whole Run**
+- Next: **Week 4 — Permission Is Not Containment** (link to be added when published)
+
 ## The failure mode: “just run it again” is not an experiment
 
 Consider a simple coding task: inspect a repository, identify the relevant files, make a change, then run the tests. Assume the original agent has already listed the files and read the configuration. On its next turn, it chooses an unhelpful command.
