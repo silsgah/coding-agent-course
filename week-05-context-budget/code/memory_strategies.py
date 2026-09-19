@@ -16,7 +16,9 @@ Inspired by:
 from __future__ import annotations
 
 import asyncio
+import argparse
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -233,10 +235,23 @@ def create_demo_skills(skills_dir: Path) -> None:
 
 
 async def main() -> None:
+    parser = argparse.ArgumentParser(description="Demonstrate project instructions, learned memory, and skills")
+    parser.add_argument(
+        "--project-dir", type=Path,
+        help="Project directory to inspect. Defaults to a disposable demo directory.",
+    )
+    args = parser.parse_args()
     print_header("Week 5 — Memory Strategies", "AGENTS.md, MEMORY.md, and Skills")
-    validate_setup()
 
-    project_dir = Path.cwd()
+    # This demo is local file I/O only; it should work before an API key is
+    # configured and should not silently write teaching artifacts into a repo.
+    temporary_directory: tempfile.TemporaryDirectory[str] | None = None
+    if args.project_dir:
+        project_dir = args.project_dir.resolve()
+    else:
+        temporary_directory = tempfile.TemporaryDirectory(prefix="week5-memory-demo-")
+        project_dir = Path(temporary_directory.name)
+        console.print(f"[dim]Using disposable demo directory: {project_dir}[/dim]")
 
     # 1. AGENTS.md
     console.print("\n[bold]═══ 1. AGENTS.md — Project Instructions ═══[/bold]")
@@ -282,6 +297,9 @@ async def main() -> None:
 
     combined = "\n".join(system_prompt_parts)
     console.print(f"[dim]Total system prompt: ~{len(combined) // 4} tokens[/dim]")
+
+    if temporary_directory:
+        temporary_directory.cleanup()
 
 
 if __name__ == "__main__":

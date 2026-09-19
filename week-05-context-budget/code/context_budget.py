@@ -67,13 +67,21 @@ class ContextBudget:
     history_tokens: int = 0
     compaction_events: int = 0
 
+    def __post_init__(self) -> None:
+        if self.max_tokens <= 0:
+            raise ValueError("max_tokens must be positive")
+        if not 0 < self.compaction_threshold <= 1:
+            raise ValueError("compaction_threshold must be in (0, 1]")
+        if self.reserved_for_response < 0:
+            raise ValueError("reserved_for_response cannot be negative")
+
     @property
     def used_tokens(self) -> int:
         return self.system_tokens + self.memory_tokens + self.history_tokens
 
     @property
     def available_tokens(self) -> int:
-        return self.max_tokens - self.used_tokens - self.reserved_for_response
+        return max(0, self.max_tokens - self.used_tokens - self.reserved_for_response)
 
     @property
     def usage_pct(self) -> float:

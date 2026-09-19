@@ -103,8 +103,23 @@ python context_budget.py
 # Memory strategies demo
 python memory_strategies.py
 
-# NOOA comparison
+# Offline comparison of growing history versus method boundaries
 python nooa_comparison.py
+
+# Dependency-free focused-symbol context demo (Python)
+python lsp_context.py context_budget.py ContextBudget
+```
+
+`memory_strategies.py`, `nooa_comparison.py`, and `lsp_context.py` run without
+an API key. The memory demo uses a disposable directory unless you deliberately
+pass `--project-dir`; it will never add example memories or skills to your
+repository by default. `context_budget.py` is the interactive, model-backed
+example and requires a configured provider.
+
+## Test It
+
+```bash
+python -m unittest discover -s week-05-context-budget/tests -v
 ```
 
 ## Exercises
