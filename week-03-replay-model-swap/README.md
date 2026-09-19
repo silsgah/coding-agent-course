@@ -50,7 +50,7 @@ The replay harness:
 ### `model_swap.py` — Swap models and compare
 
 Runs the same task with multiple models from the same starting point:
-- Same prompt, same tools, same permission mode
+- Same inherited prompt and observations, same tool schemas
 - Different models → different tool calls, token costs, and answers
 - Outputs a comparison table
 
@@ -78,7 +78,7 @@ When an agent produces a wrong answer, the question is *where* it went wrong. Re
 cd week-03-replay-model-swap/code
 
 # First, generate a run to replay from
-python replay_harness.py --task "List the files here and create a summary.md"
+python replay_harness.py --task "List the files in this project and explain the layout"
 
 # Fork the exact same checkpoint prefix once per model
 python model_swap.py --original sessions/latest --from-step 1 \
@@ -96,6 +96,12 @@ makes the branch independently reproducible while preserving the source run.
 `--from-step 0` forks immediately after the user request. Higher values fork
 after that many completed tool calls. The harness rejects a step that does not
 exist rather than silently replaying the wrong state.
+
+> **Safety boundary:** This Week 3 replay runner reuses the introductory host
+> tool executor so its live examples are not a sandbox or permission system.
+> Run it only in a disposable workspace. Week 4 adds the containment boundary;
+> a production replay runner should inject that executor rather than execute
+> tools directly on the host.
 
 ## Test It
 

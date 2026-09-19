@@ -14,6 +14,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
@@ -45,12 +46,19 @@ def copy_event_prefix(events: list[dict], writer: CheckpointWriter) -> None:
         ))
 
 
-async def continue_run(history: list[Message], writer: CheckpointWriter, model: str) -> RunMetrics:
+async def continue_run(
+    history: list[Message],
+    writer: CheckpointWriter,
+    model: str,
+    *,
+    provider_factory: Callable[..., Any] = get_provider,
+    tool_executor: Callable[[str, dict], str] = execute_tool,
+) -> RunMetrics:
     """Execute the agent loop and write every new event through to disk."""
     started = time.perf_counter()
     metrics = RunMetrics(model=model)
     try:
-        provider = get_provider(model=model)
+        provider = provider_factory(model=model)
         for _ in range(MAX_ITERATIONS):
             response = await provider.chat([Message(role="system", content=SYSTEM_PROMPT)] + history, tools=TOOL_SCHEMAS)
             metrics.add_usage(response.usage)
@@ -61,7 +69,7 @@ async def continue_run(history: list[Message], writer: CheckpointWriter, model: 
                     step_id = uuid.uuid4().hex[:8]
                     print_tool_call(tool_call.name, tool_call.arguments)
                     writer.log_tool_call(tool_call.name, tool_call.arguments, step_id)
-                    result = execute_tool(tool_call.name, tool_call.arguments)
+                    result = tool_executor(tool_call.name, tool_call.arguments)
                     writer.log_tool_result(tool_call.name, result, step_id)
                     writer.log_step_complete(step_id)
                     history.append(Message(role="assistant", content="", tool_calls=[{
@@ -85,15 +93,30 @@ async def continue_run(history: list[Message], writer: CheckpointWriter, model: 
     return metrics
 
 
-async def run_fresh(task: str, session_dir: Path, model: str) -> RunMetrics:
+async def run_fresh(
+    task: str,
+    session_dir: Path,
+    model: str,
+    **dependencies: Any,
+) -> RunMetrics:
     session_dir.mkdir(parents=True, exist_ok=False)
     writer = CheckpointWriter(session_dir)
     writer.log_user_message(task)
     console.print(f"\n[bold]New run | Model: {model} | Session: {session_dir.name}[/bold]\n")
-    return await continue_run([Message(role="user", content=task)], writer, model)
+    return await continue_run([Message(role="user", content=task)], writer, model, **dependencies)
 
 
-async def replay_from(source_dir: Path, from_step: int, target_dir: Path, model: str) -> RunMetrics:
+async def replay_from(
+    source_dir: Path,
+    from_step: int,
+    target_dir: Path,
+    model: str,
+    **dependencies: Any,
+) -> RunMetrics:
+    source_path = source_dir.resolve()
+    target_path = target_dir.resolve()
+    if target_path == source_path or source_path in target_path.parents:
+        raise ValueError("Replay target must not be the source session or one of its children")
     events = load_events(source_dir)
     prefix = events_through_step(events, from_step)
     target_dir.mkdir(parents=True, exist_ok=False)
@@ -103,7 +126,7 @@ async def replay_from(source_dir: Path, from_step: int, target_dir: Path, model:
         "source_session": str(source_dir.resolve()), "from_step": from_step, "model": model,
     }, step_id="replay"))
     console.print(f"\n[bold]Replay | From completed step {from_step} | Source: {source_dir.name} | Model: {model}[/bold]\n")
-    return await continue_run(history_from_events(prefix), writer, model)
+    return await continue_run(history_from_events(prefix), writer, model, **dependencies)
 
 
 def session_name(prefix: str) -> str:

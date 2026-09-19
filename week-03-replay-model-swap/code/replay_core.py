@@ -14,6 +14,10 @@ from typing import Any
 from shared.models import Message
 
 
+class ReplayFormatError(ValueError):
+    """Raised when a replay checkpoint cannot be safely interpreted."""
+
+
 @dataclass
 class RunMetrics:
     """Metrics accumulated while an agent run is executing."""
@@ -41,19 +45,37 @@ def checkpoint_path(session_dir: Path) -> Path:
 
 
 def load_events(session_dir: Path) -> list[dict[str, Any]]:
-    """Load JSONL checkpoint events, with a useful error for malformed logs."""
+    """Load validated replay events, ignoring only a torn final JSONL record."""
     path = checkpoint_path(session_dir)
     if not path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {path}")
 
+    lines = [
+        (number, line.strip())
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
+        if line.strip()
+    ]
     events: list[dict[str, Any]] = []
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        if not line.strip():
-            continue
+    known_types = {
+        "user_message", "tool_call", "tool_result", "assistant_response",
+        "step_complete", "replay_metadata",
+    }
+    for index, (line_number, line) in enumerate(lines):
         try:
-            events.append(json.loads(line))
+            event = json.loads(line)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"Invalid JSON in {path} at line {line_number}") from exc
+            if index == len(lines) - 1 and events:
+                break
+            raise ReplayFormatError(
+                f"Invalid JSON in {path} at line {line_number}"
+            ) from exc
+        if not isinstance(event, dict):
+            raise ReplayFormatError(f"Checkpoint line {line_number} must be a JSON object")
+        if event.get("event_type") not in known_types:
+            raise ReplayFormatError(f"Unknown event type on checkpoint line {line_number}")
+        if not isinstance(event.get("data"), dict):
+            raise ReplayFormatError(f"Checkpoint line {line_number} has invalid event data")
+        events.append(event)
     return events
 
 

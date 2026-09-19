@@ -13,7 +13,7 @@ CODE_DIR = Path(__file__).resolve().parents[1] / "code"
 sys.path.insert(0, str(CODE_DIR))
 
 from comparison_report import markdown_report, run_summary
-from replay_core import events_through_step, history_from_events, load_events
+from replay_core import ReplayFormatError, events_through_step, history_from_events, load_events
 import replay_harness
 from shared.models import ModelResponse
 
@@ -53,12 +53,10 @@ class ReplayCoreTests(unittest.TestCase):
             source, branch = root / "source", root / "branch"
             source.mkdir()
             (source / "checkpoint.jsonl").write_text("\n".join(json.dumps(event) for event in EVENTS) + "\n", encoding="utf-8")
-            original_factory = replay_harness.get_provider
-            replay_harness.get_provider = lambda model: FakeProvider()
-            try:
-                metrics = asyncio.run(replay_harness.replay_from(source, 1, branch, "fake-model"))
-            finally:
-                replay_harness.get_provider = original_factory
+            metrics = asyncio.run(replay_harness.replay_from(
+                source, 1, branch, "fake-model",
+                provider_factory=lambda **_: FakeProvider(),
+            ))
             branch_events = load_events(branch)
             metrics_file = json.loads((branch / "run_metrics.json").read_text(encoding="utf-8"))
         self.assertEqual(metrics.answer, "A replayed answer.")
@@ -85,8 +83,28 @@ class ComparisonReportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             session = Path(temporary_directory)
             (session / "checkpoint.jsonl").write_text("not-json\n", encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "line 1"):
+            with self.assertRaisesRegex(ReplayFormatError, "line 1"):
                 load_events(session)
+
+    def test_torn_final_checkpoint_record_is_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            session = Path(temporary_directory)
+            (session / "checkpoint.jsonl").write_text(
+                json.dumps(EVENTS[0]) + "\n{" , encoding="utf-8"
+            )
+            events = load_events(session)
+        self.assertEqual(events, [EVENTS[0]])
+
+    def test_replay_rejects_target_inside_source_session(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            source = Path(temporary_directory) / "source"
+            source.mkdir()
+            (source / "checkpoint.jsonl").write_text(
+                "\n".join(json.dumps(event) for event in EVENTS) + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "must not"):
+                asyncio.run(replay_harness.replay_from(source, 1, source / "branch", "fake-model"))
 
 
 if __name__ == "__main__":

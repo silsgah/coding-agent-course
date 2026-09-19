@@ -15,8 +15,8 @@ integration coverage, baseline tests, and article completion.
 ## Evidence Collected
 
 - All Python files under `week-*/code/` compile with `py_compile`.
-- Existing offline suites pass: Week 1 (2), Week 2 (6), Week 3 (6), Week 4
-  (4), Week 5 (6), Week 6 (6), Week 7 (6), and Week 8 (5): **41 tests total**.
+- Existing offline suites pass: Week 1 (2), Week 2 (6), Week 3 (8), Week 4
+  (4), Week 5 (6), Week 6 (6), Week 7 (6), and Week 8 (5): **43 tests total**.
 - Every week now has a dedicated offline test directory.
 - Substack drafts exist for Weeks 3, 5, and 7 only.
 - Week 8 includes a safe local issue review-packet command and a non-overwriting
@@ -61,8 +61,10 @@ need idempotency keys or compensating actions for that boundary.
 metadata, metrics are persisted, and six offline tests exercise the core
 replay contract.
 
-**Gap:** A live replay should ultimately execute through the sandbox seam, not
-directly through host tools. Cost figures must remain explicitly approximate.
+**Gap:** Replay parsing now validates artifacts, ignores only a torn final
+record, and rejects branch targets inside the source session. A live replay
+should ultimately execute through the sandbox seam, not directly through host
+tools. Cost figures must remain explicitly approximate.
 
 ### Week 4 — Containment and Sandboxing
 
