@@ -107,7 +107,12 @@ await continue_run(history, writer, model)
 
 Two design choices are doing most of the work here.
 
-First, the source session is immutable. A replay cannot accidentally rewrite the evidence it is meant to examine. Second, the branch contains its inherited prefix instead of merely pointing at it. That makes the branch portable and replayable in its own right; a report can inspect one directory and see the full state the model received.
+First, the source session is immutable. The runner rejects a branch target that
+is the source session or a child of it, so a replay cannot accidentally nest
+new artifacts inside the evidence it is meant to examine. Second, the branch
+contains its inherited prefix instead of merely pointing at it. That makes the
+branch portable and replayable in its own right; a report can inspect one
+directory and see the full state the model received.
 
 `--from-step 0` is also intentional: it preserves the user request but none of the original model’s choices. Larger values fork after that many completed tool calls. If the requested step is unavailable, the harness fails loudly rather than silently running from the wrong point.
 
@@ -126,7 +131,7 @@ This produces a separate session directory for each candidate. The harness does 
 
 That separation is the architectural point. The agent loop should not be rewritten because the model changed. Model selection is an input to the experiment, not a fork of the harness code.
 
-Of course, a model swap alone does not make an experiment perfectly deterministic. Sampling settings can vary; external tools can return different data; and a command that writes to disk has a real side effect. The replay harness isolates the *recorded context* and model choice. Week 4’s sandboxing work is the complementary control: it will constrain where those replayed tools are allowed to act.
+Of course, a model swap alone does not make an experiment perfectly deterministic. Sampling settings can vary; external tools can return different data; and a command that writes to disk has a real side effect. The replay harness isolates the *recorded context* and model choice. Its current live runner still uses the introductory host executor, so it belongs only in a disposable workspace. Week 4’s sandboxing work is the complementary control: a production replay runner should inject that constrained executor before tools are allowed to act.
 
 ## Record the evidence, then judge it
 
@@ -146,14 +151,16 @@ That separation is easy to overlook when building agents. Metrics are measuremen
 
 ## Testing the replay contract without calling a model
 
-Before comparing live models, I added an offline test suite around the behavior that must not change. The six tests cover:
+Before comparing live models, I added an offline test suite around the behavior that must not change. The eight tests cover:
 
 - parsing a checkpoint and rejecting malformed JSON with its line number;
 - reconstructing history through a valid fork boundary;
 - rejecting a missing replay step;
 - preserving only the user request at step zero;
 - generating a comparison report and cost estimate; and
-- simulating a branch to verify that inherited events, replay metadata, a new answer, and persisted token metrics all end up in the correct session.
+- simulating a branch to verify that inherited events, replay metadata, a new answer, and persisted token metrics all end up in the correct session;
+- tolerating only a torn final checkpoint record while reporting real JSON corruption; and
+- rejecting a replay target inside its source session.
 
 The tests are not evaluating model intelligence. They are verifying the harness invariant that makes model evaluation possible: a branch must preserve the right state, without mutating the original run.
 
