@@ -105,6 +105,17 @@ python durable_runtime.py
 python crash_simulation.py
 ```
 
+## Test It
+
+Run the checkpoint reconstruction tests from the repository root:
+
+```bash
+python -m unittest discover -s week-02-resumability-checkpoints/tests -v
+```
+
+They verify an event log can rebuild a complete tool conversation and that an
+empty checkpoint returns the expected empty state.
+
 ## Exercises
 
 See [exercises/exercises.md](exercises/exercises.md)

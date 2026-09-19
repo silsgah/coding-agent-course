@@ -15,9 +15,9 @@ integration coverage, baseline tests, and article completion.
 ## Evidence Collected
 
 - All Python files under `week-*/code/` compile with `py_compile`.
-- Existing offline suites pass: Week 3 (6 tests), Week 4 (4), Week 5 (6), Week
-  6 (6), Week 7 (6), and Week 8 (5): **33 tests total**.
-- Weeks 1 and 2 currently have no dedicated automated test directory.
+- Existing offline suites pass: Week 1 (2), Week 2 (2), Week 3 (6), Week 4
+  (4), Week 5 (6), Week 6 (6), Week 7 (6), and Week 8 (5): **37 tests total**.
+- Every week now has a dedicated offline test directory.
 - Substack drafts exist for Weeks 3, 5, and 7 only.
 - Week 8 includes a safe local issue review-packet command and a non-overwriting
   capstone template; neither makes external GitHub writes.
@@ -30,7 +30,7 @@ integration coverage, baseline tests, and article completion.
 | Isolation | Workspace paths are robust against sibling-prefix and symlink escapes | Code fixed | Week 4 now uses resolved-path ancestry checks; retain regression tests. |
 | Evaluation safety | No executable validator strings | Code fixed | Week 8 uses trusted validator callables; retain regression tests. |
 | Eval isolation | Every benchmark uses a scoped executor/workspace | Code fixed | Week 8 uses a workspace executor and does not change process CWD. |
-| Testability | Every week has offline deterministic checks | Partial | Add dedicated tests for Weeks 1 and 2. |
+| Testability | Every week has offline deterministic checks | Code fixed | Retain the 37-test baseline as the shared regression suite grows. |
 | Documentation | Every advertised command exists and is runnable | Code fixed | Week 8 now provides safe local review-packet and template commands. |
 | Publishing | Each post matches code, evidence, and series structure | Partial | Add drafts for Weeks 1, 2, 4, 6, and 8; then run the article checklist below. |
 
@@ -41,18 +41,18 @@ integration coverage, baseline tests, and article completion.
 **Strength:** It teaches the essential ReAct sequence and puts a human approval
 gate in the loop.
 
-**Gap:** Tools operate directly on the host and there are no tests for tool
-argument handling, approval denial, or history pairing. Keep the lesson as a
-minimal baseline, but label it as intentionally unsafe outside a disposable
-workspace.
+**Gap:** Tools operate directly on the host. Baseline tests now cover tool-result
+history pairing and approval denial; keep the lesson as a minimal baseline and
+label it as intentionally unsafe outside a disposable workspace.
 
 ### Week 2 — Resumability and Checkpoints
 
 **Strength:** Append-only event history is the correct durable artifact; the
 current dangling-tool-call recovery logic addresses a real provider contract.
 
-**Gap:** No committed tests currently cover checkpoint round-trips, interrupted
-tool calls, malformed JSONL, or exactly-once resume semantics.
+**Gap:** Baseline tests cover checkpoint round-trips and empty state. Interrupted
+tool calls, malformed JSONL, and exactly-once resume semantics still need
+dedicated fixtures.
 
 ### Week 3 — Replay and Model Swap
 
@@ -136,13 +136,11 @@ Before publishing an installment, verify all of the following:
 
 ## Remediation Order
 
-1. **Weeks 1–2 tests** — establish the baseline contracts that later lessons
-   depend on.
-2. **Integration coverage** — add Docker-enabled Week 4 and sandbox-backed
+1. **Integration coverage** — add Docker-enabled Week 4 and sandbox-backed
    Week 8 runs, then define regression thresholds.
-3. **Article completion** — create/review all missing drafts against the
+2. **Article completion** — create/review all missing drafts against the
    article standard.
-4. **Consolidation** — extract shared runtime, executor, reporting, and test
+3. **Consolidation** — extract shared runtime, executor, reporting, and test
    fixtures into one package only after the lesson examples are proven.
 
 ## Definition of Done for the Course

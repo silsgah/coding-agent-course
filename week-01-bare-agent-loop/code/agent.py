@@ -21,6 +21,7 @@ import asyncio
 import json
 import sys
 from pathlib import Path
+from typing import Any, Callable
 
 # Add project root to path for shared imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -61,7 +62,14 @@ Available tools: read_file, write_file, bash
 # ---------------------------------------------------------------------------
 # The agent loop — this is it, the whole thing
 # ---------------------------------------------------------------------------
-async def agent_loop(user_message: str, history: list[Message]) -> str:
+async def agent_loop(
+    user_message: str,
+    history: list[Message],
+    *,
+    provider_factory: Callable[[], Any] = get_provider,
+    permission_resolver: Callable[[str, dict], bool] = ask_permission,
+    tool_executor: Callable[[str, dict], str] = execute_tool,
+) -> str:
     """
     Run one complete agent turn.
 
@@ -81,7 +89,7 @@ async def agent_loop(user_message: str, history: list[Message]) -> str:
     Returns:
         The assistant's final text response
     """
-    provider = get_provider()
+    provider = provider_factory()
 
     # Add the user message to history
     history.append(Message(role="user", content=user_message))
@@ -106,10 +114,10 @@ async def agent_loop(user_message: str, history: list[Message]) -> str:
                 # ── THE PERMISSION GATE ──────────────────────────
                 # This is the first harness component: nothing
                 # executes without the human saying "yes".
-                approved = ask_permission(tool_call.name, tool_call.arguments)
+                approved = permission_resolver(tool_call.name, tool_call.arguments)
 
                 if approved:
-                    result = execute_tool(tool_call.name, tool_call.arguments)
+                    result = tool_executor(tool_call.name, tool_call.arguments)
                     console.print(f"[dim]✅ Tool result ({len(result)} chars)[/dim]")
                 else:
                     result = "⛔ User denied this tool call."

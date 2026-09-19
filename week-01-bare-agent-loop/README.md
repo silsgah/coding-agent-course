@@ -113,6 +113,18 @@ You'll get an interactive prompt. Try:
 - `Read the README.md file` (triggers `read_file`)
 - `Create a file called hello.txt with "Hello from my agent"` (triggers `write_file` — asks permission!)
 
+## Test It
+
+Run the offline contract tests from the repository root:
+
+```bash
+python -m unittest discover -s week-01-bare-agent-loop/tests -v
+```
+
+They verify that approved tool results are returned to the model and that a
+denied tool call becomes an explicit observation rather than silently ending
+the run.
+
 ## Exercises
 
 See [exercises/exercises.md](exercises/exercises.md) for hands-on practice.
