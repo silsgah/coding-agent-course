@@ -15,8 +15,8 @@ integration coverage, baseline tests, and article completion.
 ## Evidence Collected
 
 - All Python files under `week-*/code/` compile with `py_compile`.
-- Existing offline suites pass: Week 1 (2), Week 2 (2), Week 3 (6), Week 4
-  (4), Week 5 (6), Week 6 (6), Week 7 (6), and Week 8 (5): **37 tests total**.
+- Existing offline suites pass: Week 1 (2), Week 2 (6), Week 3 (6), Week 4
+  (4), Week 5 (6), Week 6 (6), Week 7 (6), and Week 8 (5): **41 tests total**.
 - Every week now has a dedicated offline test directory.
 - Substack drafts exist for Weeks 3, 5, and 7 only.
 - Week 8 includes a safe local issue review-packet command and a non-overwriting
@@ -50,9 +50,10 @@ label it as intentionally unsafe outside a disposable workspace.
 **Strength:** Append-only event history is the correct durable artifact; the
 current dangling-tool-call recovery logic addresses a real provider contract.
 
-**Gap:** Baseline tests cover checkpoint round-trips and empty state. Interrupted
-tool calls, malformed JSONL, and exactly-once resume semantics still need
-dedicated fixtures.
+**Gap:** Recovery tests cover complete conversations, empty state, an interrupted
+tool request, torn final JSONL, and malformed event data. The log is durable
+conversation state, not exactly-once side-effect execution; production tools
+need idempotency keys or compensating actions for that boundary.
 
 ### Week 3 — Replay and Model Swap
 

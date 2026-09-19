@@ -66,7 +66,9 @@ The checkpoint system uses an **append-only JSONL file** (one JSON object per li
 - `assistant_response` — the model's final answer
 - `step_complete` — marks a logical step as done
 
-On resume, we replay the JSONL to rebuild the conversation history without re-executing any tools.
+On resume, we replay the JSONL to rebuild the conversation history without re-executing completed tools. If a crash occurs after logging a tool request but before a result exists, the incomplete request is removed from the reconstructed history and the model decides what to do next.
+
+This is a durable conversation record, not an exactly-once side-effect protocol. A crash after a tool has changed the outside world but before its result is persisted can still require an idempotency key or compensating action in a production system.
 
 ### `crash_simulation.py` — Intentionally crash and recover
 

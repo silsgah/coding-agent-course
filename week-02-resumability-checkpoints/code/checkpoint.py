@@ -15,6 +15,7 @@ Inspired by the durable runtime in DecodingAI's coding agent
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
@@ -24,6 +25,10 @@ from typing import Any
 from rich.console import Console
 
 console = Console()
+
+
+class CheckpointFormatError(ValueError):
+    """Raised when a checkpoint cannot be safely replayed."""
 
 
 # ---------------------------------------------------------------------------
@@ -50,9 +55,11 @@ class CheckpointWriter:
         self.log_path = session_dir / "checkpoint.jsonl"
 
     def write(self, event: CheckpointEvent) -> None:
-        """Append one event to the checkpoint log."""
-        with open(self.log_path, "a") as f:
+        """Append and synchronously persist one event to the checkpoint log."""
+        with open(self.log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(asdict(event)) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
         console.print(f"[dim]💾 Checkpoint: {event.event_type} ({event.step_id})[/dim]")
 
     def log_user_message(self, message: str) -> str:
@@ -125,12 +132,7 @@ class CheckpointReader:
         if not self.has_checkpoint():
             return state
 
-        events = []
-        with open(self.log_path) as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    events.append(json.loads(line))
+        events = self._read_events()
 
         console.print(f"\n[bold cyan]📂 Resuming from checkpoint ({len(events)} events)...[/bold cyan]")
 
@@ -175,7 +177,105 @@ class CheckpointReader:
             elif event_type == "step_complete":
                 state.completed_steps.add(step_id)
 
+        # ── Handle dangling tool_calls ────────────────────────────
+        # If the process crashed after logging a tool_call but before
+        # executing it (no tool_result), the last message will be an
+        # assistant message with a tool_call and no matching tool result.
+        # The model API requires every tool_call to have a tool result,
+        # so we strip dangling ones to let the model re-decide.
+        while (
+            state.messages
+            and state.messages[-1].get("role") == "assistant"
+            and state.messages[-1].get("tool_calls")
+        ):
+            dangling = state.messages[-1]["tool_calls"][0]
+            console.print(
+                f"[yellow]⚠️  Stripping dangling tool_call: "
+                f"{dangling['name']} (crashed before execution)[/yellow]"
+            )
+            state.messages.pop()
+
         console.print(f"[green]✅ Rebuilt {len(state.messages)} messages, "
                       f"{len(state.completed_steps)} completed steps[/green]")
 
         return state
+
+    def _read_events(self) -> list[dict[str, Any]]:
+        """Read validated JSONL events, ignoring only a torn final record.
+
+        A crash can interrupt the final append and leave one incomplete JSON
+        line. Earlier malformed lines are unsafe because later events may
+        depend on them, so those fail with an actionable line number.
+        """
+        with open(self.log_path, encoding="utf-8") as f:
+            lines = [(number, line.strip()) for number, line in enumerate(f, 1)]
+        lines = [(number, line) for number, line in lines if line]
+
+        events: list[dict[str, Any]] = []
+        known_types = {
+            "user_message",
+            "tool_call",
+            "tool_result",
+            "assistant_response",
+            "step_complete",
+        }
+        for index, (line_number, line) in enumerate(lines):
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError as error:
+                if index == len(lines) - 1:
+                    console.print(
+                        "[yellow]⚠️  Ignoring torn final checkpoint record "
+                        f"on line {line_number}[/yellow]"
+                    )
+                    break
+                raise CheckpointFormatError(
+                    f"Invalid JSON on checkpoint line {line_number}: {error.msg}"
+                ) from error
+
+            if not isinstance(event, dict):
+                raise CheckpointFormatError(
+                    f"Checkpoint line {line_number} must be a JSON object"
+                )
+            if event.get("event_type") not in known_types:
+                raise CheckpointFormatError(
+                    f"Unknown event type on checkpoint line {line_number}"
+                )
+            if not isinstance(event.get("data"), dict):
+                raise CheckpointFormatError(
+                    f"Checkpoint line {line_number} has invalid event data"
+                )
+            self._validate_event(event, line_number)
+            events.append(event)
+
+        return events
+
+    @staticmethod
+    def _validate_event(event: dict[str, Any], line_number: int) -> None:
+        """Validate fields needed to rebuild a provider-compatible history."""
+        required_fields = {
+            "user_message": {"message"},
+            "tool_call": {"tool_name", "arguments"},
+            "tool_result": {"tool_name", "result"},
+            "assistant_response": {"response"},
+            "step_complete": {"completed"},
+        }
+        event_type = event["event_type"]
+        missing = required_fields[event_type] - event["data"].keys()
+        if missing:
+            fields = ", ".join(sorted(missing))
+            raise CheckpointFormatError(
+                f"Checkpoint line {line_number} is missing required field(s): {fields}"
+            )
+        if event_type in {"tool_call", "tool_result", "step_complete"}:
+            step_id = event.get("step_id")
+            if not isinstance(step_id, str) or not step_id:
+                raise CheckpointFormatError(
+                    f"Checkpoint line {line_number} has no usable step_id"
+                )
+        if event_type == "tool_call" and not isinstance(
+            event["data"]["arguments"], dict
+        ):
+            raise CheckpointFormatError(
+                f"Checkpoint line {line_number} has non-object tool arguments"
+            )
