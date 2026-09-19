@@ -1,6 +1,6 @@
 # Week 8 — Evaluation & Real-World Swarms
 
-> Why a green test suite isn't enough: build benchmarks, regression probes, and online evals. End-to-end: a teammate labels a GitHub issue, the swarm returns a reviewed pull request.
+> Why a green test suite isn't enough: build isolated benchmarks and evidence packets for a human-reviewed delivery pipeline.
 
 ---
 
@@ -9,8 +9,8 @@
 By the end of this week, you will:
 1. Build a **benchmark suite** that tests your agent on repeatable tasks
 2. Create **regression probes** that catch when changes break capabilities
-3. Implement **online evals** — LLM-as-judge scoring of live runs
-4. Build the **full pipeline**: GitHub issue → agent swarm → reviewed PR
+3. Identify what an online LLM-as-judge integration would need before it can be trusted
+4. Build the local evidence packet for a human-reviewed issue → sandbox → PR workflow
 
 ## The Big Idea
 
@@ -20,7 +20,7 @@ A green unit test suite is necessary but not sufficient. Unit tests verify indiv
 
 1. **Benchmarks** — "Given this task, does the agent produce the right output?" Run 50 tasks, measure pass rate.
 2. **Regression probes** — "Did my last change break something that used to work?" Run the same 10 tasks before and after.
-3. **Online evals** — "For this live run, was the output good?" Use an LLM judge to score each response.
+3. **Online evals** — "For this live run, was the output good?" A calibrated LLM judge can score each response, but it needs separate implementation and validation.
 
 This is the evaluation infrastructure that separates a demo from a product.
 
@@ -33,14 +33,14 @@ This is the evaluation infrastructure that separates a demo from a product.
 │  ┌──────────────┐  ┌──────────────┐  ┌───────────────────┐  │
 │  │  Benchmarks  │  │  Regression  │  │   Online Evals    │  │
 │  │              │  │  Probes      │  │                   │  │
-│  │  50 tasks    │  │  10 tasks    │  │  LLM-as-judge     │  │
-│  │  Pass/fail   │  │  Before/after│  │  Score 1-5        │  │
-│  │  Monthly     │  │  Every PR    │  │  Every run        │  │
+│  │  Local tasks │  │  Baselines   │  │  Future extension │  │
+│  │  Pass/fail   │  │  Before/after│  │  Calibrated judge │  │
+│  │  Repeatable  │  │  Regression  │  │  Separate review  │  │
 │  └──────────────┘  └──────────────┘  └───────────────────┘  │
 │                                                              │
 │  ┌──────────────────────────────────────────────────────┐    │
 │  │              End-to-End Pipeline                      │    │
-│  │  GitHub Issue → Agent Swarm → Code → Tests → PR      │    │
+│  │  Issue → Sandbox → Evidence Packet → Human Review → PR│    │
 │  └──────────────────────────────────────────────────────┘    │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -49,13 +49,11 @@ This is the evaluation infrastructure that separates a demo from a product.
 
 The capstone ties everything together:
 
-1. A teammate **labels a GitHub issue** with `agent-ready`
-2. The system **decomposes** the issue into subtasks (Week 7)
-3. A **swarm of agents** works the subtasks in parallel
-4. Each agent works in its own **sandbox** (Week 4)
-5. Results are **merged** into a review packet
-6. A reviewer checks the diff, test output, and benchmark evidence
-7. A human approves any branch push or PR creation through an authorized integration
+1. A human supplies issue text to the local planner
+2. The planner emits explicit exploration, implementation, verification, and review stages
+3. Any implementation is run in a sandbox selected by the operator (Week 4)
+4. The operator records changed files, tests, and benchmark evidence
+5. A reviewer checks that evidence before authorizing a branch push or PR through a separate integration
 
 ## Code Walkthrough
 
@@ -110,4 +108,6 @@ See [exercises/exercises.md](exercises/exercises.md) — this week's exercises A
 
 ---
 
-**Capstone Deliverable:** An agent (or agent swarm) that closes a real GitHub issue, benchmarked on accuracy, reliability, and token cost — with a short write-up justifying your harness design choices.
+**Capstone Deliverable:** A scoped benchmark suite and a local review packet
+for an issue-to-change workflow, with a short write-up of the harness design
+and the evidence a human would require before an authorized PR is opened.

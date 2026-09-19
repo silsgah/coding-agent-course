@@ -18,7 +18,7 @@ integration coverage, baseline tests, and article completion.
 - Existing offline suites pass: Week 1 (2), Week 2 (6), Week 3 (8), Week 4
   (4), Week 5 (6), Week 6 (6), Week 7 (6), and Week 8 (5): **43 tests total**.
 - Every week now has a dedicated offline test directory.
-- Substack drafts exist for Weeks 3, 5, and 7 only.
+- Substack drafts exist for every Week 1–8 installment.
 - Week 8 includes a safe local issue review-packet command and a non-overwriting
   capstone template; neither makes external GitHub writes.
 
@@ -32,7 +32,7 @@ integration coverage, baseline tests, and article completion.
 | Eval isolation | Every benchmark uses a scoped executor/workspace | Code fixed | Week 8 uses a workspace executor and does not change process CWD. |
 | Testability | Every week has offline deterministic checks | Code fixed | Retain the 37-test baseline as the shared regression suite grows. |
 | Documentation | Every advertised command exists and is runnable | Code fixed | Week 8 now provides safe local review-packet and template commands. |
-| Publishing | Each post matches code, evidence, and series structure | Partial | Add drafts for Weeks 1, 2, 4, 6, and 8; then run the article checklist below. |
+| Publishing | Each post matches code, evidence, and series structure | Code fixed | Retain the article checklist below for every substantive revision. |
 
 ## Findings by Week
 

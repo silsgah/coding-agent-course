@@ -1,6 +1,6 @@
 # Week 4 — Containment & Sandboxing
 
-> Four permission modes (read-only → full trust). Docker Workspace isolation. Remote sandbox execution.
+> Four permission modes (read-only → full trust) and Docker workspace isolation.
 
 ---
 
@@ -9,7 +9,7 @@
 By the end of this week, you will:
 1. Implement **four permission modes** with graduated trust
 2. Run your agent inside a **Docker container** so it can't damage your machine
-3. Understand **remote sandboxing** (Modal-style) for cloud execution
+3. Understand where a remote sandbox adapter would fit in the execution boundary
 4. Know why containment is a **harness problem**, not a model problem
 
 ## The Big Idea
@@ -71,12 +71,11 @@ Wraps tool execution in a Docker container:
 - No access to your SSH keys, env vars, or other repos
 - Container is destroyed after the session
 
-### `remote_sandbox.py` — Remote execution concept
+### Remote execution — extension point
 
-Demonstrates the *idea* of remote sandboxing (like Modal or E2B):
-- Tool execution happens on a remote server
-- Your local machine never runs untrusted code
-- Multiple agents can run in parallel, each in their own sandbox
+This lesson implements Docker locally. A remote sandbox provider (for example,
+one that creates short-lived cloud workspaces) belongs behind the same tool
+execution boundary, but is intentionally not included as a runnable adapter.
 
 ## Key Design Decisions
 
@@ -126,4 +125,5 @@ See [exercises/exercises.md](exercises/exercises.md)
 
 ---
 
-**Deliverable:** Agent runs safely in an isolated, remote environment.
+**Deliverable:** An agent execution boundary with graduated permissions and a
+Docker-backed local sandbox that fails closed when Docker is unavailable.
