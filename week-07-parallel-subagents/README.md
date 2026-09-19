@@ -95,6 +95,27 @@ python budget_contract.py
 python single_vs_swarm.py
 ```
 
+`budget_contract.py` and `single_vs_swarm.py` are deterministic offline
+examples. The swarm has hard caps: at most five subtasks, configurable child
+token/iteration/time budgets, a concurrency limit, and one retry only for
+failed children. A child returns a validated report rather than its raw
+conversation; failed reports remain visible to the merger.
+
+## Safety and production boundary
+
+Parallelism multiplies tool access as well as throughput. By default, this
+lesson gives child agents only workspace-bound, read-only `read_file` and
+`list_files` tools—no shell, network, or write access. In a production
+deployment, inject the Week 4 sandboxed executor for broader capabilities and
+enforce per-child credentials, filesystem scope, network policy, and aggregate
+cost limits.
+
+## Test It
+
+```bash
+python -m unittest discover -s week-07-parallel-subagents/tests -v
+```
+
 ## Exercises
 
 See [exercises/exercises.md](exercises/exercises.md)
