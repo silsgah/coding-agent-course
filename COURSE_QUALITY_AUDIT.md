@@ -4,13 +4,21 @@
 **Scope:** Weeks 1–8 lesson READMEs, runnable Python, test coverage, Substack drafts, and release claims.  
 **Standard:** A lesson claim must map to committed code, an executable command, a bounded safety model, and a repeatable verification path.
 
+> **Superseded scope note (2026-09-30):** This audit applies to the small
+> instructional examples in this repository only. It must not be read as an
+> equivalence claim with the canonical integrated implementation in
+> [`building-a-coding-agent-from-scratch-course`](../building-a-coding-agent-from-scratch-course/).
+> See [REFERENCE_ALIGNMENT_PLAN.md](REFERENCE_ALIGNMENT_PLAN.md) before
+> publishing or expanding the companion course.
+
 ## Executive Summary
 
-The course has a clear learning progression and the strongest recent modules
-(Weeks 3–8) now have deterministic tests and honest operational boundaries.
-It is **not yet safe to describe the whole course as production-grade**. The
-original P0 code-safety issues are remediated; the remaining release work is
-integration coverage, baseline tests, and article completion.
+The course has a clear learning progression and deterministic offline checks.
+It is **not an integrated production coding agent**. The stronger canonical
+implementation has a shared CLI/TUI, runtime, sandbox seam, integration suite,
+ADRs, and operational documentation that these isolated examples do not
+replicate. The remaining release work is alignment with that implementation,
+integration coverage, and article revision.
 
 ## Evidence Collected
 
@@ -30,9 +38,9 @@ integration coverage, baseline tests, and article completion.
 | Isolation | Workspace paths are robust against sibling-prefix and symlink escapes | Code fixed | Week 4 now uses resolved-path ancestry checks; retain regression tests. |
 | Evaluation safety | No executable validator strings | Code fixed | Week 8 uses trusted validator callables; retain regression tests. |
 | Eval isolation | Every benchmark uses a scoped executor/workspace | Code fixed | Week 8 uses a workspace executor and does not change process CWD. |
-| Testability | Every week has offline deterministic checks | Code fixed | Retain the 37-test baseline as the shared regression suite grows. |
+| Testability | Every week has offline deterministic checks | Code fixed | Retain the 43-test baseline as the shared regression suite grows. |
 | Documentation | Every advertised command exists and is runnable | Code fixed | Week 8 now provides safe local review-packet and template commands. |
-| Publishing | Each post matches code, evidence, and series structure | Code fixed | Retain the article checklist below for every substantive revision. |
+| Publishing | Each post matches the canonical implementation, evidence, and series structure | Blocked pending alignment | Preserve published Weeks 1–2; revise Weeks 3–8 against the reference implementation before publishing. |
 
 ## Findings by Week
 

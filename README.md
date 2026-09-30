@@ -17,6 +17,35 @@
 
 ---
 
+> **Course companion, not the canonical runtime.** This repository keeps small,
+> readable labs for teaching one harness concept at a time. The integrated agent
+> used as the canonical runnable implementation lives in
+> [building-a-coding-agent-from-scratch-course](https://github.com/silsgah/building-a-coding-agent-from-scratch-course): its `decode` CLI/TUI, durable
+> runtime, Docker/Modal sandbox seam, integration tests, and operator docs are
+> the source of truth for end-to-end claims. Read
+> [REFERENCE_ALIGNMENT_PLAN.md](REFERENCE_ALIGNMENT_PLAN.md) before using this
+> companion as a publication or product reference.
+
+## Canonical implementation map
+
+Use the lab to isolate a concept; use the canonical lesson to run the composed
+system and inspect its production-facing contracts.
+
+| This companion | Canonical `decode` lesson / surface |
+| --- | --- |
+| Week 1 — bare loop | [System design](https://github.com/silsgah/building-a-coding-agent-from-scratch-course/tree/master/lessons/01-system-design) and [agent loop](https://github.com/silsgah/building-a-coding-agent-from-scratch-course/tree/master/lessons/02-agent-loop) |
+| Week 2 — checkpoints | [Durable runtime](https://github.com/silsgah/building-a-coding-agent-from-scratch-course/tree/master/lessons/03-durable-runtime) |
+| Week 3 — replay | [Runtime and replay operator guide](https://github.com/silsgah/building-a-coding-agent-from-scratch-course/tree/master/running_the_code/runtime.md) |
+| Week 4 — containment | [Permissions and sandbox](https://github.com/silsgah/building-a-coding-agent-from-scratch-course/tree/master/lessons/05-permissions-and-sandbox) |
+| Week 5 — context | [Context engineering](https://github.com/silsgah/building-a-coding-agent-from-scratch-course/tree/master/lessons/04-context-engineering) |
+| Week 6 — harness design | [`decode` agent and harness packages](https://github.com/silsgah/building-a-coding-agent-from-scratch-course/tree/master/src/decode) |
+| Week 7 — parallel subagents | [Subagents](https://github.com/silsgah/building-a-coding-agent-from-scratch-course/tree/master/lessons/06-subagents) |
+| Week 8 — evaluation and shipping | [Evals](https://github.com/silsgah/building-a-coding-agent-from-scratch-course/tree/master/lessons/07-evals) and [ship](https://github.com/silsgah/building-a-coding-agent-from-scratch-course/tree/master/lessons/08-ship) |
+
+The labs remain useful for learning, but do not infer that they compose into
+the same agent without the canonical runtime’s shared execution, artifact,
+permission, and test infrastructure.
+
 ## About the course
 
 Modern coding agents are not useful because of the model alone. Their **harness** determines what the model can see, which tools it can call, how risky actions are controlled, how context is managed, whether work can resume after failure, how sub-agents are coordinated, and how behaviour is evaluated.
