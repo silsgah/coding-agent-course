@@ -1,186 +1,143 @@
-# Building a Coding Agent From Scratch, Week 3: Replay the Decision, Not the Whole Run
+# Building a Coding Agent From Scratch, Week 3: Replay Is an Experiment, Not a Rerun
 
-### A checkpoint is more than crash recovery. It is the point from which you can ask a controlled “what if?” question.
+### A durable coding agent turns one observed run into evidence. A useful model comparison starts from that evidence, not from a fresh prompt.
 
-Last week, I made my coding agent survive interruption. Every important action—a user request, a model-selected tool call, the tool’s result, and the completion marker—is written to an append-only JSONL checkpoint. If the process dies, the agent can rebuild its conversation and continue without redoing finished work.
+In [Week 1](https://kwablagah.substack.com/p/why-the-agent-loop-is-20-lines-of?r=bpg99), I reduced a coding agent to its essential loop: ask a model what to do, execute a tool call, return the observation, and repeat. In [Week 2](https://kwablagah.substack.com/p/your-coding-agent-has-a-fatal-flaw?r=bpg99), I dealt with the first operational flaw in that loop: a process that loses its working state cannot reliably recover after an interruption.
 
-That solved a reliability problem. This week, I am using the same record to solve a debugging problem.
+This week changes why durability matters.
 
-When an agent makes a bad decision, the obvious response is to start another run with another model. But that does not tell us much. The second model receives the original prompt, then makes its own early choices, sees different tool output, and reaches a different state. The two runs are no longer answering the same question.
+The useful outcome is not merely “the agent resumes.” A durable run is a record of what the agent saw and did. That record lets us ask a disciplined question:
 
-The question I actually want to ask is narrower:
+> Given this exact request and this exact observed state, what would change if the next model call used a different model?
 
-> Given this exact task, conversation, and set of observed tool results, what would another model do next?
+That is replay. It is not “run the prompt again and hope the second result is better.” It is a controlled fork of a recorded execution.
 
-That is what the Week 3 replay harness does. It forks an existing agent run at a completed step, preserves the original evidence, and lets a new branch continue from the same state. The model can change. The inherited history cannot.
-
-This is the third installment in my *Building a Coding Agent From Scratch* series:
-
-1. **Week 1 — The bare agent loop:** model → tool call → observation → next step.
-2. **Week 2 — Resumability and checkpoints:** persist that loop so a crashed run can resume.
-3. **Week 3 — Replay and model swaps:** branch a recorded run to debug and compare decisions.
-
-The code for this lesson is in the [course repository](https://github.com/silsgah/coding-agent-course/tree/master/week-03-replay-model-swap).
+For this installment I am grounding the series in the canonical implementation, [`decode`](https://github.com/silsgah/building-a-coding-agent-from-scratch-course), specifically its [Durable Runtime lesson](https://github.com/silsgah/building-a-coding-agent-from-scratch-course/tree/master/lessons/03-durable-runtime). The small companion lab still explains the mechanics, but the runtime is where those mechanics become an operator-facing system.
 
 ## Series navigation
 
 - [Week 1 — Why the Agent Loop is 20 Lines of Code](https://kwablagah.substack.com/p/why-the-agent-loop-is-20-lines-of?r=bpg99)
 - [Week 2 — Your Coding Agent Has a Fatal Flaw](https://kwablagah.substack.com/p/your-coding-agent-has-a-fatal-flaw?r=bpg99)
-- **Week 3 — Replay the Decision, Not the Whole Run**
-- Next: **Week 4 — Permission Is Not Containment** (link to be added when published)
+- **Week 3 — Replay Is an Experiment, Not a Rerun**
+- Next: **Week 4 — Permission Is Not Containment**
 
-## The failure mode: “just run it again” is not an experiment
+## Why a second run is not a comparison
 
-Consider a simple coding task: inspect a repository, identify the relevant files, make a change, then run the tests. Assume the original agent has already listed the files and read the configuration. On its next turn, it chooses an unhelpful command.
+Suppose an agent receives a repository task. It lists files, reads configuration, runs a command, and then chooses a poor next action. The intuitive response is to send the original prompt to another model.
 
-If I restart from the initial prompt with another model, I cannot tell whether a better outcome came from the new model or from a different directory listing, a different file read, or a different first plan. I changed too many variables at once.
+But that changes almost everything at once. The second model may inspect a different file first. A live command can return different output. A different early plan changes the context of every later decision. If the result improves, we cannot honestly attribute that improvement to the model swap.
 
-Replay fixes the boundary. The original run stays intact; the branch inherits only the events up to the selected completed tool step:
+Replay defines the boundary instead:
 
 ```text
-Observed run                         Replay branch
+Observed execution                     Replay fork
 
-user request                         user request          (inherited)
-tool call: list files                tool call: list files (inherited)
-tool result: repository contents     tool result: ...      (inherited)
-step 1 complete                      step 1 complete       (fork point)
-tool call: wrong command             model B decides next  (new)
-...                                  ...
+user request                           user request            inherited
+model request                          model request           inherited
+tool call + observation                tool call + observation inherited
+checkpoint: model request              checkpoint anchor
+next model decision                    replacement model call  new
+downstream tool calls                  downstream tool calls   new
 ```
 
-The model sees the same information at the fork point. The branch records a new decision sequence beside the original one. That makes divergence visible and attributable.
+The fork inherits the evidence before the selected checkpoint. It does not inherit the decision after it. That makes divergence meaningful: both branches arrived at the fork with the same recorded context; their later behavior is the experiment.
 
-## The runtime contract from Week 2
+## An interactive agent is not automatically a durable runtime
 
-The replay harness works because the Week 2 checkpoint is an event log, not a loose collection of console output. One JSON object is appended for each meaningful event:
+This distinction is easy to miss. A terminal UI can make a coding agent pleasant to use, yet still leave a long-running execution vulnerable to a laptop sleep, a process crash, or an approval that arrives hours later.
 
-```json
-{"event_type":"user_message","data":{"message":"Inspect this project"}}
-{"event_type":"tool_call","data":{"tool_name":"bash","arguments":{"command":"ls"}},"step_id":"step-1"}
-{"event_type":"tool_result","data":{"tool_name":"bash","result":"README.md\nsrc"},"step_id":"step-1"}
-{"event_type":"step_complete","data":{"completed":true},"step_id":"step-1"}
-```
+`decode` therefore has a separate headless runtime path. The normal interactive route is optimized for conversation. The durable route is optimized for execution that can be resumed, inspected, and replayed. It runs the same agent through Kitaru, a workflow runtime that checkpoints each model call and tool call.
 
-This distinction is important. A model API call is stateless from the harness’s perspective: the next request succeeds only because the harness sends a history containing the previous messages and tool observations. The durable artifact must therefore be the context needed to reconstruct that history—not an attempt to save invisible model state.
+That granularity matters. A single final transcript cannot tell the runtime where it is safe to continue. A checkpoint immediately before a model request can. If the worker stops there, recovery can reuse the earlier work and issue the pending request again; if an operator wants to test a model change, that same checkpoint is a precise fork point.
 
-For replay, a completed tool step is a useful boundary because it includes both sides of an action: what the model requested and what the environment returned. Forking after a request but before its result would leave an unresolved tool call in the message history and make the state ambiguous.
-
-## Forking a run, event by event
-
-The core of the implementation is deliberately small. First, I select the exact event prefix ending at the requested completed step:
-
-```python
-def events_through_step(events, completed_steps):
-    if completed_steps == 0:
-        return [event for event in events
-                if event["event_type"] == "user_message"][:1]
-
-    prefix, seen_steps = [], 0
-
-    for event in events:
-        if event["event_type"] == "assistant_response":
-            break
-        prefix.append(event)
-        if event["event_type"] == "step_complete":
-            seen_steps += 1
-            if seen_steps == completed_steps:
-                return prefix
-
-    if completed_steps > seen_steps:
-        raise ValueError("Requested replay step does not exist")
-    return prefix
-```
-
-The branch copies that prefix into its own checkpoint file, adds explicit replay metadata, rebuilds the conversation, and resumes the normal tool loop:
-
-```python
-prefix = events_through_step(events, from_step)
-writer = CheckpointWriter(target_dir)
-copy_event_prefix(prefix, writer)
-
-writer.write(CheckpointEvent(
-    event_type="replay_metadata",
-    data={
-        "source_session": str(source_dir.resolve()),
-        "from_step": from_step,
-        "model": model,
-    },
-    step_id="replay",
-))
-
-history = history_from_events(prefix)
-await continue_run(history, writer, model)
-```
-
-Two design choices are doing most of the work here.
-
-First, the source session is immutable. The runner rejects a branch target that
-is the source session or a child of it, so a replay cannot accidentally nest
-new artifacts inside the evidence it is meant to examine. Second, the branch
-contains its inherited prefix instead of merely pointing at it. That makes the
-branch portable and replayable in its own right; a report can inspect one
-directory and see the full state the model received.
-
-`--from-step 0` is also intentional: it preserves the user request but none of the original model’s choices. Larger values fork after that many completed tool calls. If the requested step is unavailable, the harness fails loudly rather than silently running from the wrong point.
-
-## One checkpoint, multiple model branches
-
-The model-swap runner applies the same fork operation once per model:
+The practical workflow begins with a durable run:
 
 ```bash
-python code/model_swap.py \
-  --original sessions/latest \
-  --from-step 1 \
-  --models gemini-2.0-flash gpt-4o-mini
+uv run decode run "Inspect this repository and explain the test layout"
 ```
 
-This produces a separate session directory for each candidate. The harness does not need to know whether the chosen model comes from Gemini, OpenAI, OpenRouter, or another compatible provider. It asks the shared provider layer for a model, sends the reconstructed messages and tool schemas, and records the resulting events.
-
-That separation is the architectural point. The agent loop should not be rewritten because the model changed. Model selection is an input to the experiment, not a fork of the harness code.
-
-Of course, a model swap alone does not make an experiment perfectly deterministic. Sampling settings can vary; external tools can return different data; and a command that writes to disk has a real side effect. The replay harness isolates the *recorded context* and model choice. Its current live runner still uses the introductory host executor, so it belongs only in a disposable workspace. Week 4’s sandboxing work is the complementary control: a production replay runner should inject that constrained executor before tools are allowed to act.
-
-## Record the evidence, then judge it
-
-Each completed branch writes a compact `run_metrics.json` alongside its checkpoint. It captures the model name, prompt tokens, completion tokens, tool-call count, elapsed time, final answer, and any error. The comparison tool turns multiple branches into a Markdown report:
+The command returns an execution identifier. Operators can use it to inspect the execution and its durable anchors:
 
 ```bash
-python code/comparison_report.py \
-  --runs sessions/swap-gemini-2-0-flash sessions/swap-gpt-4o-mini \
-  --output comparison_report.md
+uv run kitaru executions get <EXECUTION_ID>
 ```
 
-The report puts the operational facts in one table and then prints the final answers side by side. For supported model families, it can also estimate token cost using configured per-million-token rates.
+For a real investigation, the identifier is not incidental metadata. It is the handle for the evidence we intend to compare.
 
-This is intentionally not an automatic quality verdict. A branch with fewer tool calls might be efficient—or it might have skipped the investigation required to answer correctly. A lower token count is not evidence of a better fix. The job of this layer is to preserve and organize evidence. Task-specific tests, human review, and later evaluation infrastructure decide whether a result is actually good.
+## Replay is a fork with caching rules
 
-That separation is easy to overlook when building agents. Metrics are measurements, not conclusions.
+The replay command is deliberately thin:
 
-## Testing the replay contract without calling a model
+```bash
+uv run decode replay <EXECUTION_ID> \
+  --from decode_runtime_model_request \
+  --model gemini-2.5-pro
+```
 
-Before comparing live models, I added an offline test suite around the behavior that must not change. The eight tests cover:
+The anchor names the durable call boundary, not a vague instruction such as “start near the middle.” Work upstream of the anchor is replayed from recorded results. Work downstream is executed again. The new model receives the inherited conversation state and makes the next decision from there.
 
-- parsing a checkpoint and rejecting malformed JSON with its line number;
-- reconstructing history through a valid fork boundary;
-- rejecting a missing replay step;
-- preserving only the user request at step zero;
-- generating a comparison report and cost estimate; and
-- simulating a branch to verify that inherited events, replay metadata, a new answer, and persisted token metrics all end up in the correct session;
-- tolerating only a torn final checkpoint record while reporting real JSON corruption; and
-- rejecting a replay target inside its source session.
+This also defines the limits of the guarantee. Replay preserves the recorded prefix; it does not make downstream reality deterministic. A new model may choose a different tool. A downstream command may read changed files or perform a real side effect. That is why replay belongs with an explicit execution boundary and a controlled workspace, not as an excuse to rerun unbounded host commands.
 
-The tests are not evaluating model intelligence. They are verifying the harness invariant that makes model evaluation possible: a branch must preserve the right state, without mutating the original run.
+There are two other constraints worth stating plainly:
+
+- A model override applies to the configured active provider; it is not a promise of arbitrary cross-provider migration.
+- Human-in-the-loop approvals are not silently recycled. In the local setup, replay can wait for a fresh answer rather than pretending an earlier approval applies to a changed execution.
+
+Those restrictions are not missing polish. They preserve the meaning of the experiment.
+
+## The baseline run is part of the experiment
+
+The most common replay mistake is comparing the original execution directly with a model-swapped fork. That comparison is useful for debugging, but it cannot separate model behavior from replay mechanics.
+
+A stronger model-change investigation uses three runs:
+
+1. **Observed run:** capture the original execution and select a checkpoint anchor.
+2. **Baseline replay:** replay from that anchor with the original configuration, without a model override.
+3. **Model fork:** replay from the same anchor with the candidate model.
+
+```text
+                         replay: same configuration
+observed execution ─────────────────────────────────► baseline
+          │
+          └──────────── replay: model override ─────► candidate fork
+```
+
+Now the comparison has two purposes. The baseline tells us whether the replay path itself behaves as expected. The candidate fork tells us what changed when the selected model changed. A different result is not automatically a defect; it may be the signal we were looking for. The important thing is that we can locate the changed variable and inspect the inherited context.
+
+## A checkpoint is an operational contract
+
+At first, checkpointing sounds like a storage detail: write an event log or save a blob somewhere. In a coding agent it becomes a behavioral contract between the model loop, tools, runtime, and operator.
+
+The contract needs to answer concrete questions:
+
+- What model request or tool call has definitely completed?
+- Which observations are safe to reuse?
+- What is allowed to run again after the anchor?
+- Where can an operator inspect the execution before taking action?
+- How do tests verify the recovery and replay path?
+
+The canonical project treats these as architecture rather than as logging. Its runtime lesson ships a runnable demonstration, while its integration suite includes an end-to-end capstone test for the runtime contract. This is exactly the point where an agent project stops being a collection of promising scripts and starts behaving like a system with operational semantics.
+
+The companion repository’s Week 3 lab remains useful for learning the smaller pieces: rebuilding history from persisted events, protecting source artifacts from mutation, and producing comparison reports. But those are teaching artifacts, not a claim that a JSONL demo is equivalent to a durable workflow engine. Keeping that distinction explicit has made this series more honest—and more useful.
+
+## What replay does not evaluate for us
+
+Replay creates evidence; it does not declare a winner.
+
+A candidate model that uses fewer tools may be efficient, or it may have skipped the investigation needed for a safe change. A shorter answer may be clearer, or it may omit the crucial caveat. Token counts and elapsed time are measurements. Correctness still comes from task-specific tests, review, and eventually a deliberate evaluation suite.
+
+Equally, replay is not containment. If downstream work can write files, invoke networked tools, or otherwise affect the environment, those effects need their own permission and sandboxing policy. That is the subject of the next installment.
 
 ## The larger lesson
 
-In Week 1, an agent could act. In Week 2, it could survive interruption. In Week 3, its decisions become inspectable experiments.
+Week 1 made the agent loop visible. Week 2 made its state survivable. Week 3 makes an execution inspectable and falsifiable.
 
-That is a meaningful shift. A bad run is no longer only a transcript to read after the fact. It becomes a reproducible starting point: hold the observed state constant, change one variable, and see where behavior diverges.
+That sounds abstract, but it changes the development posture. Instead of responding to a surprising agent decision with prompt folklore or a brand-new run, we can preserve the observed state, fork at a named boundary, hold the configuration steady, change one variable, and compare the results.
 
-The model still matters. But once the harness can preserve state, isolate a fork boundary, and compare branches honestly, the work of improving an agent starts to look less like prompt folklore and more like systems engineering.
+The model is still important. The difference is that improving the agent no longer has to be guesswork. It can be systems engineering.
 
-Next week, I will address the risk that has been present since the first `bash` tool call: how to let an agent execute useful commands without handing it unrestricted access to the machine running it.
+Next, I will take on the safety boundary that this runtime deliberately does not solve: permission is not containment, and a coding agent that can execute commands needs both.
 
 ---
 
-*This is Week 3 of my “Building a Coding Agent From Scratch” series. Week 1 built the agent loop; Week 2 added durability; Week 3 turns durable runs into replayable experiments.*
+*This is Week 3 of my “Building a Coding Agent From Scratch” series. Read the [canonical durable-runtime lesson](https://github.com/silsgah/building-a-coding-agent-from-scratch-course/tree/master/lessons/03-durable-runtime), or explore the [companion Week 3 lab](https://github.com/silsgah/coding-agent-course/tree/master/week-03-replay-model-swap).*
