@@ -1,133 +1,187 @@
 # Building a Coding Agent From Scratch, Week 8: An Evaluation Is Evidence, Not a Vibe
 
-### A green unit suite says the harness did what its components promised. It does not yet say an agent completed a representative coding task correctly.
+### A green test suite proves that components meet their contracts. It does not prove that a coding agent completes representative work—or that a harness change made it better.
 
-After seven weeks, this series has a tool loop, durable checkpoints, replay,
-sandbox boundaries, context controls, an inspectable harness, and bounded
-subagents. The natural temptation is to call that a finished coding agent.
+After seven weeks, this series has a real agent harness: a tool loop, durable execution, replay, workspace containment, context controls, an interaction model, and bounded parallel exploration. It would be tempting to call that finished.
 
-It is not finished until there is a repeatable way to ask whether changes make
-the agent better, worse, or merely different.
+It is not finished until we can answer a more difficult question:
 
-Week 8 adds the first evaluation layer: isolated fixture tasks, trusted
-validators, bounded agent runs, JSON results, and a local issue-to-review
-packet. It deliberately stops short of live GitHub writes, automated pull
-requests, and an LLM judge. Those require a separate authorized integration and
-calibration process.
+> Did this change make the agent better, worse, or merely different?
 
-This is the final installment in my *Building a Coding Agent From Scratch*
-series. The implementation is in the [course repository](https://github.com/silsgah/coding-agent-course/tree/master/week-08-evaluation-real-world).
+That is what an evaluation system is for.
 
-## A benchmark needs a controlled world
+This final week is grounded in the canonical [`decode`](https://github.com/silsgah/building-a-coding-agent-from-scratch-course) project’s [evaluation lesson](https://github.com/silsgah/building-a-coding-agent-from-scratch-course/tree/master/lessons/07-evals), its [evaluation architecture decision record](https://github.com/silsgah/building-a-coding-agent-from-scratch-course/blob/master/docs/adr/0017-decode-eval-suite.md), and the operational [evaluation guide](https://github.com/silsgah/building-a-coding-agent-from-scratch-course/blob/master/running_the_code/evals.md). The lesson is not “add an LLM judge.” It is a layered evidence system: human demonstrations, outcome benchmarks, behavioral regression probes, and online evaluation over real traces.
 
-The suite defines tasks such as creating `hello.py`, listing files, extracting
-numbers from a fixture, writing output files, and reporting a missing file.
-Each task starts in its own temporary workspace.
+## Series navigation
 
-That isolation is not just tidiness. If two benchmark cases share a directory,
-a file left behind by one case can make another pass for the wrong reason. The
-runner never changes the process working directory; it gives each task a scoped
-executor instead:
+- [Week 1 — Why the Agent Loop is 20 Lines of Code](https://kwablagah.substack.com/p/why-the-agent-loop-is-20-lines-of?r=bpg99)
+- [Week 2 — Your Coding Agent Has a Fatal Flaw](https://kwablagah.substack.com/p/your-coding-agent-has-a-fatal-flaw?r=bpg99)
+- [Week 3 — Replay Is an Experiment, Not a Rerun](https://github.com/silsgah/coding-agent-course/tree/master/week-03-replay-model-swap)
+- [Week 4 — Permission Is Not Containment](https://github.com/silsgah/coding-agent-course/tree/master/week-04-containment-sandboxing)
+- [Week 5 — Context Is a Budget, Not a Memory Dump](https://github.com/silsgah/coding-agent-course/tree/master/week-05-context-budget)
+- [Week 6 — The Harness Is the Product](https://github.com/silsgah/coding-agent-course/tree/master/week-06-harness-design)
+- [Week 7 — Parallelism Is a Coordination Problem](https://github.com/silsgah/coding-agent-course/tree/master/week-07-parallel-subagents)
+- **Week 8 — An Evaluation Is Evidence, Not a Vibe**
 
-```python
-with tempfile.TemporaryDirectory(prefix=f"bench-{task.name}-") as directory:
-    workspace = Path(directory)
-    result = await run_benchmark_task(task, workspace, provider_factory)
-```
+## Tests, benchmarks, and evals answer different questions
 
-The executor exposes only `read_file`, `write_file`, and `list_files`, resolving
-every path against that task’s workspace. A benchmark should measure the
-capability it claims to measure—not accidental access to the repository where
-the suite happens to run.
+One of the most expensive mistakes in agent engineering is using one kind of evidence to answer every question.
 
-## Validators are harness code, never model-provided programs
+| Evidence layer | The question it answers | Example |
+| --- | --- | --- |
+| Unit and integration tests | “Does the mechanism honor its contract?” | Does a denied tool request reach the executor? Does a replay preserve its anchor? |
+| Outcome benchmark | “Can the agent complete this task?” | Can it repair a seeded bug in a fresh workspace? |
+| Regression probe | “Did it work in the intended way?” | Did it use the right tool, respect a gate, preserve a fact through compaction, and keep the diff minimal? |
+| Human demonstration | “Is this useful and convincing to a person?” | Can a reviewer inspect a real bug hunt or repository-analysis run? |
+| Online evaluation | “Is live traffic still healthy?” | Do sampled production traces remain grounded and useful over time? |
 
-A benchmark needs a clear pass condition. It is tempting to store a condition
-as a string and evaluate it dynamically. That turns test data into executable
-code, which is exactly the kind of blurred authority boundary an agent harness
-is supposed to avoid.
+These are not interchangeable.
 
-Week 8 makes validators trusted Python callables selected by the harness:
+A perfect unit suite cannot prove that a model can understand a realistic repository task. A benchmark pass cannot prove that the agent did not use an unsafe shortcut. A fluent LLM judge cannot replace a deterministic assertion that a file exists. And a demo that looks impressive once may be a lucky sample rather than a reliable capability.
 
-```python
-@dataclass(frozen=True)
-class BenchmarkTask:
-    name: str
-    prompt: str
-    validator: Callable[[Path, str], bool]
-```
+The `decode` evaluation stack keeps these questions separate on purpose.
 
-The file-creation validator, for example, checks whether `hello.py` exists and
-contains a `greet` function. The model may write files and answer the task, but
-it never supplies code that the benchmark runner executes to decide its score.
+## The benchmark: outcome evidence in a controlled world
 
-Evaluation rules are part of the trusted computing base. They deserve code
-review, tests, and stable versioning just like the agent runtime.
+An outcome benchmark asks a simple question: did the agent complete the task?
 
-## Budgets turn a run into a measurement
-
-Each task has token and iteration limits. The suite records whether it passed,
-its score, tokens, tool calls, elapsed time, final answer, and any error. It
-can also write the result set as JSON:
-
-```bash
-python code/benchmark_suite.py --json-out benchmark-results.json
-```
-
-Those fields are evidence, not a quality verdict. Fewer tool calls may mean a
-more efficient solution—or a skipped investigation. A perfect fixture pass rate
-on five course tasks does not establish performance on a real repository.
-Regression thresholds should follow a measured baseline on representative work.
-
-## From an issue to a review packet, not an unattended pull request
-
-The capstone command accepts local issue text and writes a JSON review packet.
-It records a staged authority plan:
+Each benchmark task is a small world with a prompt, initial files, an isolated workspace, and a hidden oracle. The real agent works inside a fresh sandboxed workspace. Only after the run completes does the evaluator inject and execute `verify.sh` to return pass or fail.
 
 ```text
-explore   → read-only sandbox
-implement → write-enabled sandbox
-verify    → sandboxed test runner
-review    → human decision
+task fixture ──► fresh isolated Workspace ──► real agent run
+                                                  │
+                                                  ▼
+                                       hidden verification oracle
+                                                  │
+                                                  ▼
+                                              PASS / FAIL
 ```
 
-It also lists the evidence required before a change can move forward: sandbox
-identifier, changed files, test output, benchmark results, and human approval.
-The command makes no GitHub API call, creates no branch, and opens no pull
-request.
+The hidden oracle matters. If a model can read the grader, it can optimize for the grader instead of solving the task. That is why task assets distinguish the setup the agent may see from the verification code that arrives only after it stops.
 
-That restraint is intentional. An issue title is not authorization to modify a
-repository, and a passing local benchmark is not permission to publish code.
-A real integration should use narrowly scoped credentials, a sandbox per run,
-an auditable change handoff, and explicit human approval before external writes.
+Hidden does not mean mysterious. `verify.sh` is ordinary, readable grading logic, reviewed as part of the task. The suite includes oracle-sanity tests that prove both directions: a known correct solution passes, and the untouched fixture fails. Without those checks, an evaluation can become falsely reassuring because its verifier is broken or too permissive.
 
-## What I tested
+The evaluator uses the same sandbox executor seam as the agent rather than inventing another benchmark runner. A fresh Docker workspace is the normal local path; the remote sandbox backend can use the same interface. Reusing the production execution boundary means the benchmark measures the tool environment the agent actually uses.
 
-The five offline tests verify that every task requires a callable validator,
-fixtures receive isolated workspaces while the runner preserves process CWD,
-executor paths cannot escape their benchmark workspace, the tool loop produces
-JSON-serializable results, and the issue planner produces a no-external-effects
-packet that requires human review.
+## The regression suite: behavior evidence, not only outcomes
 
-Run them from the repository root:
+Two agents can both pass a task while behaving very differently. One may inspect the relevant files, obey a permission gate, and make a minimal change. Another may take a broad shortcut that happens to pass the fixture today and creates risk tomorrow.
 
-```bash
-python -m unittest discover -s week-08-evaluation-real-world/tests -v
+Regression probes encode the harness behaviors we care about preserving. They can check, for example:
+
+- that the agent uses a read tool instead of inventing repository facts;
+- that a plan or permission boundary is honored;
+- that compaction retains a critical earlier fact;
+- that a change is minimal rather than a sprawling rewrite; and
+- that a tool selection or final output meets a defined contract.
+
+This is a different judgment surface from the benchmark. Benchmarks primarily ask about task outcome. Probes ask whether the architecture still behaves as designed after a model, prompt, tool, or runtime change.
+
+The canonical project runs regression probes in temporary host-native directories so they are practical as a pre-merge engineering ritual. The threshold gate applies hard floors to metrics, while comparisons to a prior baseline begin as warnings rather than artificial hard failures on day one. That is a sensible adoption path: establish measured baselines before turning every natural variation into an incident.
+
+## Deterministic metrics first; judges where code cannot decide
+
+An LLM judge is useful for qualities that are difficult to express as a program: groundedness, completeness, reasoning quality, or whether a review explanation is genuinely helpful. It is not the right default for questions code can score exactly.
+
+The evaluation design therefore uses two surfaces:
+
+```text
+Mechanical claim                    → deterministic code metric
+file exists                         → verifier checks the filesystem
+tool was used                       → inspect recorded tool-call messages
+permission was respected            → inspect gate and event behavior
+
+Qualitative claim                   → rubric-based model judge
+review is grounded and useful       → judge with a specific rubric
+diff is minimally invasive          → judge where a simple metric is inadequate
 ```
 
-## What remains after the capstone
+The order is important. A generic score such as “quality: 4/5” is difficult to debug, difficult to calibrate, and often detached from the failure mode we actually care about. A binary, application-specific criterion—“does the answer invent a file that does not exist?”—is far more actionable.
 
-The course ends with an intentionally unfinished production checklist: Docker-
-backed integration tests, regression baselines and thresholds, representative
-real-repository tasks, and a calibrated online judge only if human evaluation
-confirms it is reliable enough for the chosen decision.
+When a judge is necessary, it should follow the agent’s configured provider route and have a clearly versioned rubric. It should not quietly become the judge of everything. The canonical system reserves judges for the parts code cannot assess, and keeps exact behavior as exact code.
 
-The broader lesson is that an agent is not ready because it can make a change.
-It is ready when a team can reproduce the conditions of that change, inspect
-its authority and evidence, and detect when the next version regresses.
+## The driver must run the real harness
+
+An evaluation can be carefully designed and still measure the wrong thing if it uses a simplified agent loop, a separate tool dispatcher, or an observability trace as its source of truth.
+
+`decode` drives the real agent construction, dependencies, turn handler, and runner. It extracts tool calls from the agent’s message history and usage from model response data—not from tracing exports. Traces are valuable for observability, but using them as grading truth would couple evaluation correctness to sampling, export timing, and a telemetry integration.
+
+This is a subtle standard with broad value: use telemetry to inspect a run; use the system’s own authoritative state to grade it.
+
+The evaluator records agent model, provider, Git revision, usage, and task results alongside the experiment. Without configuration and revision information, a pass-rate comparison says too little. A result is not reproducible merely because it has a number attached to it.
+
+## Reliability requires repeated trials
+
+A single successful agent run is a sample, not a reliability claim. Model outputs vary. External services vary. Tool timing and task trajectories vary. The evaluation runner therefore supports repeated trials per task and derives several complementary measures:
+
+| Metric | Meaning |
+| --- | --- |
+| pass@1 | Success in one attempt. |
+| pass@k | At least one success across *k* attempts. |
+| pass^k | Success on every one of *k* attempts—the reliability bar. |
+| Flakiness rate | How often outcomes vary across repeated trials. |
+| Success per dollar | Outcome quality relative to recorded model cost. |
+
+These metrics prevent a pleasant but misleading story. A high pass@k can mean the agent eventually succeeds if given enough retries; a lower pass^k may reveal that it is unreliable for unattended work. Cost-normalized success reminds us that an improvement that requires dramatically more requests is a product trade-off, not a free win.
+
+The calculation is intentionally post-hoc over recorded trial results. The evaluation infrastructure should preserve the data first, then derive transparent aggregates, rather than hiding its arithmetic behind a dashboard.
+
+## Keep costly evaluation out of ordinary CI
+
+The production-shaped benchmark and regression tracks require a provider key and observability credentials. They run the real agent, use a sandbox, and spend money. They are therefore manual commands, not a surprise side effect of `make ci` or an ordinary unit-test run.
+
+That is not an avoidance of quality control. It is a clear cadence:
+
+```text
+fast CI                 → deterministic unit and integration contracts
+feature-branch ritual   → regression probes and threshold review
+candidate comparison    → benchmark trials and reliability aggregates
+live operation          → trace review and online evaluation
+```
+
+When keys are unavailable, the evaluation entry points skip with a clear, friendly message rather than failing with a traceback or silently running a mock. Skip-friendly behavior is a feature: contributors can understand what exists without accidentally incurring cost.
+
+## Online evaluation closes the loop
+
+Offline datasets cannot capture every way users will actually use a coding agent. Online evaluation scores traces the system has already emitted from real interactive and headless sessions.
+
+This changes the evaluation question. Instead of recreating a task from scratch, an online rule looks at sampled real work and asks whether a criterion such as groundedness, completeness, or safe tool behavior remains acceptable.
+
+Online evaluation should be small and deliberate. It needs trace sampling, versioned criteria, careful treatment of user and repository data, and a human review path. It is not permission to send every private session to an external judge or to automate a production decision from a single score.
+
+The important architecture boundary is that offline experiments write to a dedicated evaluation project, while online scoring happens against the live tracing project because that is the evidence being assessed. Mixing the two would make both hard to interpret.
+
+## Evaluation is part of shipping, not a final checkbox
+
+The final course lesson moves from builder to operator: environment-scoped secrets, remote runtime deployment, and a pipeline in which an issue can eventually return a reviewed pull request. The evaluation stack is what makes that expansion defensible.
+
+Before an agent is trusted with a remote sandbox, a repository branch, or a pull-request workflow, a team should be able to show:
+
+- which benchmark tasks it reliably completes;
+- which behavioral constraints it preserves;
+- what its cost and failure modes look like across trials;
+- where its credentials and tool authority are scoped; and
+- how a human can inspect and approve the resulting change.
+
+That last point remains non-negotiable. An agent opening a pull request is an external action with lasting consequences. Evaluation evidence can inform the decision to authorize it; it does not replace authorization.
+
+## The larger lesson
+
+An evaluation is not a leaderboard number, a green unit suite, or a judge saying the answer sounds good. It is a deliberately constructed chain of evidence.
+
+```text
+trusted task fixture
+  + isolated execution
+  + honest oracle
+  + recorded configuration and usage
+  + repeated trials
+  + behavior-specific probes
+  + human review of live evidence
+  = a credible claim of improvement
+```
+
+That is where this series ends. The agent loop was always the easy part. The work was building the system around it: durable state, controlled authority, focused context, bounded parallelism, and finally an evaluation practice strong enough to tell whether the system deserves to keep evolving.
 
 ---
 
-*This is Week 8 of my “Building a Coding Agent From Scratch” series. The
-project now has isolated benchmark fixtures, trusted validators, bounded runs,
-machine-readable results, and a local human-review handoff.*
+*This is Week 8 of my “Building a Coding Agent From Scratch” series. Explore the [canonical evaluation lesson](https://github.com/silsgah/building-a-coding-agent-from-scratch-course/tree/master/lessons/07-evals), the [evaluation guide](https://github.com/silsgah/building-a-coding-agent-from-scratch-course/blob/master/running_the_code/evals.md), and the [companion Week 8 lab](https://github.com/silsgah/coding-agent-course/tree/master/week-08-evaluation-real-world).*
