@@ -64,6 +64,50 @@ uv run kitaru executions get <EXECUTION_ID>
 
 For a real investigation, the identifier is not incidental metadata. It is the handle for the evidence we intend to compare.
 
+## What is actually durable?
+
+It is tempting to say that the runtime “saves the agent.” That is too vague to be useful. A model has no hidden, recoverable process state that the harness can simply serialize. What can be made durable is the execution boundary around it: the input to each model request, the tool call it selects, the observation returned by that tool, and the control-flow point at which the runtime knows that work completed.
+
+That yields a more precise architecture:
+
+```text
+request
+  │
+  ▼
+durable workflow ──► model-request checkpoint ──► model
+  ▲                                                    │
+  │                                                    ▼
+  └── tool-result checkpoint ◄── tool call ◄── decision
+```
+
+The checkpoints are not a debugging afterthought bolted onto a chat transcript. They are the workflow’s source of truth. If a model call completed, the runtime knows that. If a tool observation was recorded, a replay can use it instead of guessing at an earlier machine state. If a boundary has not completed, the runtime knows precisely what needs to happen next.
+
+This is why the location of a checkpoint matters more than the existence of a log file. An anchor immediately before a model request gives an operator a meaningful choice: repeat the same decision under the same configuration, or swap the active model and observe a new decision. An anchor after a destructive tool call would be much less useful for that question.
+
+## From a command to an execution you can inspect
+
+The lesson’s runnable path is intentionally short, but its semantics are not casual:
+
+```bash
+# Run the agent in the durable, headless path.
+uv run decode run "Find the relevant test, make a minimal fix, and verify it"
+
+# Inspect the durable execution and identify its call anchors.
+uv run kitaru executions get <EXECUTION_ID>
+
+# Establish that replay itself is stable.
+uv run decode replay <EXECUTION_ID> --from decode_runtime_model_request
+
+# Fork the same evidence with a candidate model.
+uv run decode replay <EXECUTION_ID> \
+  --from decode_runtime_model_request \
+  --model gemini-2.5-pro
+```
+
+The first run creates the evidence. The second is the baseline. The third changes one explicitly named variable.
+
+There is a subtle but important distinction here: the runtime is not promising that two model calls will produce identical language. It is making the experimental setup inspectable. If the baseline differs unexpectedly, that is information about the environment, sampling, or replay contract. If the candidate differs after a clean baseline, that difference is much easier to attribute and investigate.
+
 ## Replay is a fork with caching rules
 
 The replay command is deliberately thin:
@@ -84,6 +128,19 @@ There are two other constraints worth stating plainly:
 - Human-in-the-loop approvals are not silently recycled. In the local setup, replay can wait for a fresh answer rather than pretending an earlier approval applies to a changed execution.
 
 Those restrictions are not missing polish. They preserve the meaning of the experiment.
+
+## A concrete failure that replay can isolate
+
+Imagine the observed agent has already inspected the repository and found a failing test. Its next model call decides whether to make a focused change or to edit several unrelated files. The investigation is not “which model produces nicer prose?” It is whether the next decision, given the same evidence, respects the task boundary.
+
+With an ordinary rerun, a candidate model might discover a different file order, issue a different exploratory command, and arrive at an apparently better result for an unknowable reason. With a replay anchor immediately before the decision, both branches inherit the test output and repository observations already recorded. We can then inspect:
+
+- the exact messages and tool results supplied to the model;
+- the tool call each branch selected after the anchor;
+- the files and tests affected by downstream work; and
+- the final task outcome, assessed by the project’s own verification.
+
+That is a small experiment, not a leaderboard. It tells us where to look when a branch diverges: context construction, model behavior, tool policy, environmental state, or the task evaluator.
 
 ## The baseline run is part of the experiment
 
@@ -119,6 +176,20 @@ The contract needs to answer concrete questions:
 The canonical project treats these as architecture rather than as logging. Its runtime lesson ships a runnable demonstration, while its integration suite includes an end-to-end capstone test for the runtime contract. This is exactly the point where an agent project stops being a collection of promising scripts and starts behaving like a system with operational semantics.
 
 The companion repository’s Week 3 lab remains useful for learning the smaller pieces: rebuilding history from persisted events, protecting source artifacts from mutation, and producing comparison reports. But those are teaching artifacts, not a claim that a JSONL demo is equivalent to a durable workflow engine. Keeping that distinction explicit has made this series more honest—and more useful.
+
+## The tests have to prove the boundary, not the model
+
+The difficult part to test is not whether a model is intelligent. That is a task-and-evaluation question. The runtime contract is more concrete:
+
+- a completed call is checkpointed before the next dependent work begins;
+- recovery continues from a known durable boundary;
+- replay reads the selected upstream results rather than executing them again;
+- the model override is routed only through supported provider configuration; and
+- the end-to-end runtime flow remains executable as the agent changes.
+
+These are the kinds of assertions that make an operational claim credible. A screenshot of a chat completing once is encouraging; it is not evidence that the agent can resume after a worker failure or fork from a named anchor. The canonical integration test is valuable because it exercises the public runtime path rather than only a helper function in isolation.
+
+For an engineering team, this also changes the review conversation. A proposed feature no longer needs to be assessed solely by reading agent prompts. Reviewers can ask what is durable, what gets re-executed, which side effects are possible after an anchor, and which test captures the intended behavior.
 
 ## What replay does not evaluate for us
 
