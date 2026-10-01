@@ -1,163 +1,189 @@
 # Building a Coding Agent From Scratch, Week 7: Parallelism Is a Coordination Problem
 
-### A swarm is not “more agents.” It is a contract for splitting work, limiting authority, and returning evidence that a coordinator can trust.
+### A swarm is not “more agents.” It is a contract for dividing work, bounding resources, restricting authority, and returning evidence a parent can use.
 
-Up to this point in the series, I have been making one coding agent more reliable: first giving it tools, then making it resumable, replayable, contained, context-aware, and easier to inspect as a Python object.
+The first six weeks of this series made one coding agent more capable and more disciplined. It can use tools, survive interruption, replay decisions, operate inside a workspace boundary, manage its context budget, and expose its behavior through an engineered harness.
 
-This week changes the shape of the problem. Some tasks are not hard because they require deep sequential reasoning; they are slow because they contain several independent investigations. A repository review might require reading the README, locating tests, mapping dependencies, and examining the source layout. One agent can do those things in sequence. It does not have to.
+This week changes the shape of the work.
 
-The obvious answer is to run several agents at once. The dangerous answer is to run several agents at once without deciding what they are allowed to do, how much they may spend, what counts as a result, or what happens when one of them fails.
+Some coding tasks are slow because they contain independent investigations: map the module layout, find the relevant tests, trace a configuration value, and inspect the public API. One agent can do all of that sequentially. It does not have to.
 
-Week 7 is about that difference: parallel subagents as a bounded execution system, not a collection of unconstrained chats.
+The tempting answer is to spawn several agents. The dangerous answer is to spawn several agents without deciding what they may do, how many may run, what they must return, what gets persisted, and what happens when one produces nonsense.
 
-This is the seventh installment in my *Building a Coding Agent From Scratch* series:
+Parallelism is a coordination problem.
 
-1. **Week 1:** the tool-using agent loop.
-2. **Week 2:** durable checkpoints and resumability.
-3. **Week 3:** replaying recorded state to compare decisions.
-4. **Week 4:** permissions and sandboxing.
-5. **Week 5:** context as a finite budget.
-6. **Week 6:** an inspectable agent-as-object harness.
-7. **Week 7:** bounded parallel subagents.
+This installment follows the canonical [`decode`](https://github.com/silsgah/building-a-coding-agent-from-scratch-course) implementation and its [subagents lesson](https://github.com/silsgah/building-a-coding-agent-from-scratch-course/tree/master/lessons/06-subagents). Its architecture decision records make the important point explicit: a useful child is not a second unbounded chat session. It is a scoped, read-only exploration loop with a budget and a report contract.
 
-The Week 7 implementation is available in the [course repository](https://github.com/silsgah/coding-agent-course/tree/master/week-07-parallel-subagents).
+## Series navigation
 
-## When parallelism is actually useful
+- [Week 1 — Why the Agent Loop is 20 Lines of Code](https://kwablagah.substack.com/p/why-the-agent-loop-is-20-lines-of?r=bpg99)
+- [Week 2 — Your Coding Agent Has a Fatal Flaw](https://kwablagah.substack.com/p/your-coding-agent-has-a-fatal-flaw?r=bpg99)
+- [Week 3 — Replay Is an Experiment, Not a Rerun](https://github.com/silsgah/coding-agent-course/tree/master/week-03-replay-model-swap)
+- [Week 4 — Permission Is Not Containment](https://github.com/silsgah/coding-agent-course/tree/master/week-04-containment-sandboxing)
+- [Week 5 — Context Is a Budget, Not a Memory Dump](https://github.com/silsgah/coding-agent-course/tree/master/week-05-context-budget)
+- [Week 6 — The Harness Is the Product](https://github.com/silsgah/coding-agent-course/tree/master/week-06-harness-design)
+- **Week 7 — Parallelism Is a Coordination Problem**
+- Next: **Week 8 — An Evaluation Is Evidence, Not a Vibe**
 
-Parallelism helps only when the work is independent.
+## First decide whether the task deserves fan-out
 
-“Read these four unrelated modules and report what each does” is a good fan-out problem. Each child can work from a fresh context and return a compact report. “Understand the architecture, change a core abstraction, then update every caller” is not. Those later steps depend on the earlier ones, so parallel work increases the chance of contradictory assumptions and duplicated effort.
+Parallel agents do not make sequential reasoning parallel. If a task is “understand the architecture, change a central abstraction, update every caller, then run the tests,” each later step depends on the earlier one. Sending that work to several children creates incompatible assumptions and duplicated edits.
 
-That gives the coordinator its first responsibility: reject a vague task decomposition and produce only independent work items. In this lesson, the model is asked to return a JSON array of at most five read-only subtasks. The response is then treated as untrusted input: parsed, deduplicated, trimmed, and capped before it can create agents.
-
-```python
-def parse_subtasks(text: str, maximum: int = 5) -> list[str]:
-    candidate = json.loads(text)
-    if not isinstance(candidate, list):
-        raise ValueError("Task decomposition must be a JSON array")
-
-    subtasks = []
-    for item in candidate:
-        task = str(item).strip()
-        if task and task not in subtasks:
-            subtasks.append(task[:500])
-
-    if not subtasks:
-        raise ValueError("Task decomposition produced no usable subtasks")
-    return subtasks[:maximum]
-```
-
-The cap is not an arbitrary UI choice. Without it, one malformed or overenthusiastic decomposition can produce dozens of model calls, explode cost, saturate rate limits, and make the final synthesis less useful. Fan-out must be budgeted before it is fast.
-
-## The child contract is the real API
-
-A child agent does not return its entire conversation history. That would recreate the context problem from Week 5 at the coordinator layer. Instead, each child returns one validated report:
-
-```python
-@dataclass(frozen=True)
-class SubagentReport:
-    subtask: str
-    status: str             # success | partial | failed
-    summary: str
-    key_facts: tuple[str, ...]
-    tokens_used: int
-    tool_calls: int
-    elapsed_seconds: float
-    error: str | None = None
-    attempt: int = 1
-```
-
-This small object does several jobs at once.
-
-It gives the coordinator a stable interface regardless of which model ran the child. It limits report summaries and fact lists so one verbose child cannot consume the merger’s entire context. It retains operational evidence—token use, tool calls, elapsed time, retries—so the parent can distinguish a useful answer from a merely fluent one. And it leaves failures visible instead of converting them into a convincing but unsupported final answer.
-
-Each child also receives a separate budget:
-
-```python
-@dataclass(frozen=True)
-class ChildBudget:
-    max_tokens: int = 8_000
-    max_iterations: int = 6
-    timeout_seconds: float = 60.0
-```
-
-Budgets are a core part of the contract, not just observability. They prevent a child from consuming the swarm’s resources indefinitely because it is stuck in a tool loop or waiting on a provider. A production system should add an aggregate swarm-level budget as well; this lesson keeps that concern explicit rather than hiding it behind an unlimited `asyncio.gather()`.
-
-## Bounded fan-out, not unlimited concurrency
-
-The scheduling core is deliberately straightforward. A semaphore limits the number of active children, and `asyncio.wait_for` bounds each child’s wall-clock time:
-
-```python
-async def bounded_child(subtask, agent_id, semaphore, budget, provider_factory, tool_executor):
-    async with semaphore:
-        try:
-            return await asyncio.wait_for(
-                run_child_agent(subtask, agent_id, budget, provider_factory, tool_executor),
-                timeout=budget.timeout_seconds,
-            )
-        except TimeoutError:
-            return SubagentReport.failed(
-                subtask,
-                f"Timed out after {budget.timeout_seconds:.0f}s",
-                budget.timeout_seconds,
-            )
-```
-
-This creates an important separation. The coordinator controls *how many* children are in flight. The child budget controls *how long* a specific child may continue. The report contract controls *what* comes back. No individual model response gets to decide all three.
-
-The swarm retries only `failed` children once, with a larger token budget. It does not retry every partial answer automatically. A partial result may be a legitimate signal that the child reached a cost or iteration limit; blindly retrying it can turn a limit into a loop. The coordinator preserves that evidence for the final answer.
-
-## Parallelism multiplies authority too
-
-The first implementation of this lesson inherited the broad tool surface from the earliest agent loop. That was convenient for a demo, but it is the wrong default for a swarm. Four parallel agents with shell and write access are not just four times faster; they are four simultaneous sources of side effects.
-
-The current default is intentionally narrower. Exploration children can only use two workspace-contained, read-only tools:
-
-- `read_file`
-- `list_files`
-
-They cannot write files, invoke a shell, or make network requests. Path resolution rejects `..` and symlink escapes beyond the workspace. Broader capabilities must be injected deliberately—and, in a real deployment, routed through the Week 4 sandbox with per-child credentials, filesystem scope, network policy, and approval rules.
-
-This is the same principle that guided the earlier permission and sandbox work: start with the smallest authority that completes the task. Fan-out makes least privilege more important, not less.
-
-## Swarm versus single agent: measure the right thing
-
-For independent tasks, parallel execution reduces wall-clock time because the slowest child, not the sum of child durations, dominates the work. The lesson includes a deterministic comparison using the same simulated worker in both modes:
+Fan-out is appropriate when the evidence-gathering branches are independent:
 
 ```text
-single agent (sequential): 0.124s | 400 tokens | 4 successful children
-swarm (parallel):          0.032s | 400 tokens | 4 successful children
+Good fan-out                         Poor fan-out
+
+map source modules                   design API → implement it → update callers
+locate tests                         reproduce bug → identify cause → patch
+inspect configuration                migrate schema → update consumers → deploy
+find references                      understand failure → choose remediation
 ```
 
-The point of this example is deliberately narrow. It demonstrates scheduling: the same independent work completes faster in parallel, without claiming that a swarm is inherently more intelligent or more token-efficient.
+The parent agent is therefore not merely a dispatcher. It is responsible for choosing independent angles and for refusing a decomposition that is too broad or too vague to be useful.
 
-In live model work, the comparison has more dimensions. A swarm adds coordinator prompts, report-merging cost, and potential duplication across children. A single agent keeps one coherent context and may outperform the swarm when the work is tightly coupled. The correct question is not “should I always use multiple agents?” It is “does this task have independent evidence-gathering branches whose results can be merged safely?”
+In `decode`, the parent makes **one** `agent(prompts=[...])` tool call. The harness validates those prompts before it creates any children: the list cannot be empty, cannot exceed the fan-out cap, and each brief must contain enough substance to guide a real investigation. A prompt such as “look around” is not an exploration plan; it is an expensive way to obtain an ungrounded summary.
 
-## What I tested
+When the input fails the contract, the harness returns a model-retry message naming the problem. No child is spawned. This is a valuable pattern: spend a cheap parent correction turn before spending several child model calls on bad work.
 
-The Week 7 module now has six deterministic tests that run without an API key. They verify:
+## The child is the same loop, re-entered with less authority
 
-- invalid child budgets and reports are rejected;
-- decompositions are parsed, deduplicated, and capped;
-- default exploration tools refuse writes and workspace escapes;
-- a child follows the complete model → tool → result → report cycle;
-- a failed child retries exactly once; and
-- parallel scheduling completes independent work faster than the same sequential schedule.
+The canonical design does not create a separate process, a durable child session, or a second agent framework for every subtask. A child is the same agent loop re-entered in-process with fresh, narrowed dependencies.
 
-The implementation also separates provider construction and tool execution from the child loop. Tests inject scripted providers and safe executors rather than relying on live network calls. That makes the orchestration contract testable independently of model behavior.
+That keeps the mechanism small:
+
+```text
+parent agent
+  │
+  └── agent(prompts=[p1, p2, p3])
+          │
+          ├── Explore child 1: fresh history + read-only tools
+          ├── Explore child 2: fresh history + read-only tools
+          └── Explore child 3: fresh history + read-only tools
+                    │
+                    ▼
+            labelled aggregate returned to parent
+```
+
+The boundaries are logical rather than process-isolated. Children share the parent process and model client, which keeps them cheap. They also share the parent’s fault domain. That trade-off is acceptable because this subagent is deliberately an **Explore** persona rather than a general coding worker.
+
+Its tool surface is structurally restricted to read-only investigation: `read`, `glob`, `grep`, and LSP. It cannot edit files, run arbitrary shell commands, fetch the web, write task lists, ask the user a question, or recursively call the `agent` tool.
+
+Those exclusions are design decisions, not omissions:
+
+- A child that can edit or run `bash` creates parallel side effects that need a much stronger coordination and isolation model.
+- A child that can ask the user can deadlock against the parent’s single decision channel.
+- A child that can spawn children makes recursion and cost growth structurally easy.
+
+Least privilege is especially important in a swarm. Four read-only researchers are manageable. Four workers with filesystem writes, shell access, and inherited credentials are a different product.
+
+## Parallelism must be a harness guarantee
+
+Models can emit several tool calls in one response, but a real product should not outsource its concurrency policy to whatever shape the model happens to choose. The `decode` harness gathers child runs itself and enforces a configurable semaphore for active child attempts.
+
+The limit has two benefits:
+
+1. It protects provider rate limits, local resources, and the user’s budget.
+2. It makes concurrency observable and testable: children genuinely overlap, but the peak never exceeds the configured bound.
+
+There is a second budget inside each child. Usage limits cap its request count, token use, and tool-call behavior independently of the parent. The parent’s context gauge deliberately does not absorb child usage; otherwise a few investigations could make the main conversation appear full even though their detailed transcripts never enter it.
+
+This is not hiding cost. It is accounting for it at the correct level. The swarm has its own resource envelope, and each child has a finite share of it.
+
+## The report contract protects the parent’s context
+
+The most common multi-agent design error is to return every child transcript to the coordinator. That gives the parent all the context bloat Week 5 worked to avoid—multiplied by the fan-out width.
+
+Instead, child transcripts are ephemeral. A child performs its scoped investigation, returns a final report, and its private model/tool history is discarded. The parent receives one labelled aggregate:
+
+```text
+## Subagent 1 — "Map the package boundaries"
+<bounded report>
+
+## Subagent 2 — "Locate the test entry points"
+<bounded report>
+
+## Subagent 3 — "Trace configuration loading"
+<bounded report>
+
+## Synthesis footer
+<how the parent should use the evidence>
+```
+
+The aggregate is deterministic in prompt order, not completion order. That makes a transcript readable and makes a replay or test comparison stable even when child durations differ.
+
+Most importantly, the fold has a **shared byte budget**. If the configured result budget is `B` and the parent requested `N` children, each report receives at most `B / N` bytes through the same truncation mechanism used elsewhere in the harness. The footer is harness overhead, not an excuse to steal from one child’s share.
+
+This makes the parent-facing context cost roughly independent of width. More children can improve coverage, but they cannot silently flood the coordinator with an ever-growing transcript.
+
+## A result is not useful merely because it is fluent
+
+A child may return polished prose without investigating anything. The resilient fan-out layer treats the child report as untrusted output and validates a simple but meaningful property: it must be non-empty and supported by actual tool use.
+
+If a child returns a report with zero tool calls, the harness retries that child once with an explicit nudge to inspect the workspace. If the retry is still unusable, the child is not retried forever and its failure becomes an honest note in the parent aggregate.
+
+```text
+child report valid? ── yes ──► truncate and fold
+         │
+         no
+         │
+   first failure? ── yes ──► retry once with a nudge
+         │
+         no
+         ▼
+  fold a visible "no usable report" note
+```
+
+The important detail is that siblings survive. A failed inspection of one package must not discard useful reports from the others. And a failure note is better product behavior than a fabricated conclusion: the parent model and the human operator can see which angle needs follow-up.
+
+## Silence by default is a coordination decision too
+
+If three children each emit every `glob`, `read`, and `grep` event into the parent terminal, the interactive experience becomes unreadable. The default behavior is therefore silent-until-done: children return their aggregate result without flooding the parent event sink.
+
+The system can expose verbose child activity when an operator explicitly asks for it, rendered as clearly indented child events. The default remains quiet because the parent’s task is to synthesize evidence, not to turn the terminal into an interleaved log stream.
+
+This is a small UX choice with a large systems implication. Observability should be available without making normal operation noisy or leaking implementation detail into the parent’s working context.
+
+## What gets persisted, and why
+
+The parent session records the spawn call and the bounded aggregate. It does **not** persist every child’s private transcript. That preserves the parent’s durable story—what was requested and what evidence returned—without making resume and replay carry a swarm’s worth of internal tool chatter.
+
+Because Explore children are read-only and their reports are deterministic at the parent boundary, the single fan-out tool result remains replay-safe. The external runtime does not need to understand every internal child event to preserve the parent’s execution contract.
+
+This is a useful general rule for orchestration: choose the smallest durable boundary that preserves the semantics the next layer actually needs.
+
+## Test the failure matrix, not only the speedup
+
+“It ran four agents at once” is not a sufficient test. The canonical subagent capstone exercises the real agent loop, tool registration, prompt guards, semaphore, scoped child dependencies, aggregate fold, session persistence, and resume path together. Its checks include:
+
+- children overlap in time but never exceed the configured concurrency cap;
+- read-only children use their allowed tools without asking the human permission resolver;
+- a child cannot recursively spawn another child;
+- every child receives its fair share of the aggregate byte budget;
+- child usage does not corrupt the parent context gauge;
+- an unsupported, zero-tool-call report retries exactly once and then becomes a visible failure note;
+- healthy siblings still complete when one child fails; and
+- parent persistence includes the request and aggregate, never private child transcripts.
+
+The test suite includes a live provider smoke test behind an explicit credential gate, but the core capstone is hermetic: it uses a scripted model to prove orchestration semantics without treating a provider response as a deterministic test fixture.
 
 ## The larger lesson
 
-The most useful way to think about a subagent is not as another autonomous worker. It is as a bounded function call with a model in the middle:
+Parallelism does not come from adding an `asyncio.gather()` call to an agent. It comes from defining contracts at every boundary:
 
 ```text
-subtask + scoped tools + budget → validated report
+independent prompts
+  + restricted authority
+  + bounded concurrency and usage
+  + validated, budgeted reports
+  + honest failure handling
+  = useful parallel exploration
 ```
 
-Once that boundary is explicit, the coordinator can schedule work, account for cost, surface failures, and merge evidence without carrying every child’s private transcript. Parallelism becomes a systems-design decision rather than a prompt trick.
+Once those controls exist, a parent agent can explore a repository faster without losing its own context, authority model, or audit trail. Without them, a swarm is merely a faster way to produce confusion and cost.
 
-Next, the course moves to evaluation: defining tasks, thresholds, and regression tests that can tell us whether these harness changes actually improve a coding agent rather than simply making it more elaborate.
+Next, I will move from “the system ran” to the harder question: how do we establish evidence that a harness change actually makes the coding agent better?
 
 ---
 
-*This is Week 7 of my “Building a Coding Agent From Scratch” series. The project now supports bounded, read-only exploration subagents with validated reports, concurrency limits, timeouts, and controlled retry behavior.*
+*This is Week 7 of my “Building a Coding Agent From Scratch” series. See the [canonical subagents lesson](https://github.com/silsgah/building-a-coding-agent-from-scratch-course/tree/master/lessons/06-subagents) and the [companion Week 7 lab](https://github.com/silsgah/coding-agent-course/tree/master/week-07-parallel-subagents).*
